@@ -22,32 +22,51 @@ function httpsGet(url, headers) {
 
 exports.handler = async function(event, context) {
   try {
-    // Supabase에서 specimens 테이블 전체 조회 (최대 100만 건)
     const url = `${SUPABASE_URL}/rest/v1/specimens?select=관리번호,표본번호,수장고,수장위치,생약명,국명,학명,수집날짜,수집장소,중요도,속명,과명,GPS,공정서,과제명&limit=100000&order=id.asc`;
     const result = await httpsGet(url, {
       "apikey": SUPABASE_KEY,
       "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Accept": "application/json",
     });
 
-    const rows = JSON.parse(result.body);
+    // 응답 파싱 및 타입 확인
+    let rows;
+    try {
+      rows = JSON.parse(result.body);
+    } catch(e) {
+      return {
+        statusCode: 500,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ ok: false, error: "파싱 실패: " + result.body.substring(0, 200) }),
+      };
+    }
 
-    // index.html의 specimen_compact 형식 [관리번호, 표본번호, ...] 배열로 변환
+    // 배열이 아닌 경우 처리
+    if (!Array.isArray(rows)) {
+      return {
+        statusCode: 500,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ ok: false, error: "예상치 못한 응답: " + JSON.stringify(rows).substring(0, 200) }),
+      };
+    }
+
+    // Supabase 객체 배열 → 앱 형식 배열로 변환
     const data = rows.map(r => [
       r["관리번호"] || "",
       r["표본번호"] || "",
-      r["수장고"] || "",
+      r["수장고"]   || "",
       r["수장위치"] || "",
-      r["생약명"] || "",
-      r["국명"] || "",
-      r["학명"] || "",
+      r["생약명"]   || "",
+      r["국명"]     || "",
+      r["학명"]     || "",
       r["수집날짜"] || "",
       r["수집장소"] || "",
-      r["중요도"] || "",
-      r["속명"] || "",
-      r["과명"] || "",
-      r["GPS"] || "",
-      r["공정서"] || "",
-      r["과제명"] || "",
+      r["중요도"]   || "",
+      r["속명"]     || "",
+      r["과명"]     || "",
+      r["GPS"]      || "",
+      r["공정서"]   || "",
+      r["과제명"]   || "",
     ]);
 
     return {
