@@ -45,7 +45,6 @@ exports.handler = async function(event, context) {
   try {
     const parsed = JSON.parse(event.body);
 
-    // API 키 검증
     if (parsed.apiKey !== API_KEY) {
       return {
         statusCode: 401,
@@ -55,6 +54,8 @@ exports.handler = async function(event, context) {
     }
 
     const rows = parsed.rows;
+    const isUpsert = parsed.upsert === true; // 수정 모드 여부
+
     if (!rows || rows.length === 0) {
       return {
         statusCode: 400,
@@ -63,7 +64,6 @@ exports.handler = async function(event, context) {
       };
     }
 
-    // 배열 → Supabase 객체 형식으로 변환
     const records = rows.map(r => ({
       "관리번호": r[0] || "",
       "표본번호": r[1] || "",
@@ -82,19 +82,23 @@ exports.handler = async function(event, context) {
       "과제명":   r[14] || "",
     }));
 
-    // Supabase upsert (관리번호 중복 시 업데이트)
     const CHUNK = 200;
     let totalAdded = 0;
 
     for (let i = 0; i < records.length; i += CHUNK) {
       const chunk = records.slice(i, i + CHUNK);
+      // upsert=true면 중복 시 업데이트, false면 중복 무시
+      const prefer = isUpsert
+        ? "resolution=merge-duplicates,return=minimal"
+        : "resolution=ignore-duplicates,return=minimal";
+
       const result = await httpsPost(
         `${SUPABASE_URL}/rest/v1/specimens`,
         {
           "apikey": SUPABASE_KEY,
           "Authorization": `Bearer ${SUPABASE_KEY}`,
           "Content-Type": "application/json",
-          "Prefer": "resolution=ignore-duplicates,return=minimal",
+          "Prefer": prefer,
         },
         JSON.stringify(chunk)
       );
