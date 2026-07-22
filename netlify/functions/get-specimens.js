@@ -22,14 +22,14 @@ function httpsGet(url, headers) {
 
 exports.handler = async function(event, context) {
   try {
-    const url = `${SUPABASE_URL}/rest/v1/specimens?select=관리번호,표본번호,수장고,수장위치,생약명,국명,학명,수집날짜,수집장소,중요도,속명,과명,GPS,공정서,과제명&limit=100000&order=id.asc`;
+    // GPS → gps (PostgreSQL 소문자 변환)
+    const url = `${SUPABASE_URL}/rest/v1/specimens?select=관리번호,표본번호,수장고,수장위치,생약명,국명,학명,수집날짜,수집장소,중요도,속명,과명,gps,공정서,과제명&limit=100000&order=id.asc`;
     const result = await httpsGet(url, {
       "apikey": SUPABASE_KEY,
       "Authorization": `Bearer ${SUPABASE_KEY}`,
       "Accept": "application/json",
     });
 
-    // 응답 파싱 및 타입 확인
     let rows;
     try {
       rows = JSON.parse(result.body);
@@ -41,7 +41,6 @@ exports.handler = async function(event, context) {
       };
     }
 
-    // 배열이 아닌 경우 처리
     if (!Array.isArray(rows)) {
       return {
         statusCode: 500,
@@ -50,7 +49,6 @@ exports.handler = async function(event, context) {
       };
     }
 
-    // Supabase 객체 배열 → 앱 형식 배열로 변환
     const data = rows.map(r => [
       r["관리번호"] || "",
       r["표본번호"] || "",
@@ -64,7 +62,7 @@ exports.handler = async function(event, context) {
       r["중요도"]   || "",
       r["속명"]     || "",
       r["과명"]     || "",
-      r["GPS"]      || "",
+      r["gps"]      || "",
       r["공정서"]   || "",
       r["과제명"]   || "",
     ]);
