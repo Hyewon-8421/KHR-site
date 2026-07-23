@@ -11136,7 +11136,39 @@ function SpeciesModal({
 }
 
 // ─── 생약 위치 지도 페이지 ────────────────────────────────────────────────────
-function MapPage() {
+// ─── 지도 마커 계산 (표본 자신의 GPS 값 기준) ───────────────────────────────
+// 예전에는 미리 계산해 둔 window.__MARKERS__를 사용했는데, 그 안의 ix 배열은
+// "표본 배열에서 몇 번째 위치인가"를 가리키는 정적 인덱스였다. 표본 데이터를
+// Supabase로 옮기면서 표본 순서/구성이 그때와 달라져, 인덱스가 가리키는 표본이
+// 바뀌어버렸다 — 그래서 GPS 좌표와 지도상 표시 위치가 어긋나고, GPS가 없는
+// 표본까지 다른 표본의 마커에 섞여 나타나는 문제가 있었다.
+// 이 함수는 매번 표본 배열을 그 자리에서 훑어 각 표본이 실제로 가진 GPS 값을
+// 기준으로 마커를 새로 계산하므로, 순서가 달라져도 항상 정확하고 GPS가 없는
+// 표본은 아예 지도에 나타나지 않는다.
+function buildMapMarkers(specimens) {
+  if (!specimens) return [];
+  const groups = new Map();
+  specimens.forEach((s, i) => {
+    const gps = s[12];
+    if (!gps || typeof gps !== "string") return;
+    if (!gps.includes(",") || gps.includes("-")) return; // 상세 페이지와 동일한 유효성 기준
+    const parts = gps.split(",").map(v => v.trim());
+    if (parts.length !== 2) return;
+    const lat = parseFloat(parts[0]);
+    const lng = parseFloat(parts[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    const key = lat.toFixed(6) + "," + lng.toFixed(6);
+    let g = groups.get(key);
+    if (!g) {
+      g = { la: lat, lo: lng, p: s[8] || "", ix: [] };
+      groups.set(key, g);
+    }
+    g.ix.push(i);
+  });
+  return Array.from(groups.values()).map(g => ({ ...g, n: g.ix.length }));
+}
+
+function MapPage({ specimens: specimensProp, specimensLoading, specimensError }) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const markersLayerRef = useRef(null);
@@ -11189,16 +11221,16 @@ function MapPage() {
     markersLayerRef.current = L.layerGroup().addTo(map);
   }, [mapReady]);
 
-  // 데이터 로드
+  // 데이터 로드 — 표본 자신의 GPS 값을 기준으로 마커를 즉석에서 계산한다.
   const loadData = useCallback(() => {
     if (loadState === "loading" || loadState === "ready") return;
+    if (!specimensProp) return; // 표본 데이터가 아직 로딩 중이면 대기
     setLoadState("loading");
-    Promise.all([Promise.resolve(window.__MARKERS__), Promise.resolve(window.__SPEC__)]).then(([mk, sp]) => {
-      setMarkers(mk);
-      setSpecimens(sp);
-      setLoadState("ready");
-    }).catch(e => setLoadState("error"));
-  }, [loadState]);
+    const mk = buildMapMarkers(specimensProp);
+    setMarkers(mk);
+    setSpecimens(specimensProp);
+    setLoadState("ready");
+  }, [loadState, specimensProp]);
 
   // 마커 렌더링
   useEffect(() => {
@@ -11357,7 +11389,7 @@ function MapPage() {
       background: filter === f ? "#7a3d1a" : "#f4f0ec",
       color: filter === f ? "#fff" : "#5a3a1a"
     }
-  }, f)), loadState === "idle" && /*#__PURE__*/React.createElement("button", {
+  }, f)), loadState === "idle" && (specimensProp ? /*#__PURE__*/React.createElement("button", {
     onClick: loadData,
     style: {
       padding: "9px 20px",
@@ -11369,7 +11401,13 @@ function MapPage() {
       fontWeight: 700,
       fontSize: 13
     }
-  }, "🗺 지도 데이터 로드"), loadState === "loading" && /*#__PURE__*/React.createElement("span", {
+  }, "🗺 지도 데이터 로드") : /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      color: "#7a3d1a",
+      fontWeight: 600
+    }
+  }, "⏳ 표본 데이터 불러오는 중...")), loadState === "loading" && /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
       color: "#7a3d1a",
@@ -11923,7 +11961,11 @@ function App() {
     reloadSpecimens: loadAllSpecimens
   }), page === "species" && /*#__PURE__*/React.createElement(SpeciesPage, {
     navParams: navParams
-  }), page === "map" && /*#__PURE__*/React.createElement(MapPage, null), page === "pharma" && /*#__PURE__*/React.createElement(PharmaStatsPage, null), page === "specimen" && /*#__PURE__*/React.createElement(SpecimenStatsPage, null)), /*#__PURE__*/React.createElement("footer", {
+  }), page === "map" && /*#__PURE__*/React.createElement(MapPage, {
+    specimens: allSpecimens,
+    specimensLoading: specimensLoading,
+    specimensError: specimensError
+  }), page === "pharma" && /*#__PURE__*/React.createElement(PharmaStatsPage, null), page === "specimen" && /*#__PURE__*/React.createElement(SpecimenStatsPage, null)), /*#__PURE__*/React.createElement("footer", {
     style: {
       background: "#0f3d22",
       color: "rgba(255,255,255,0.5)",
