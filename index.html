@@ -8791,15 +8791,20 @@ function PharmaSearchPage() {
 // ─── 제주 센터 표본 페이지 ──────────────────────────────────────────────────────
 const SPEC_KEYS = ["id", "specNo", "storage", "location", "drugName", "korName", "sciName", "collectDate", "collectPlace", "importance", "genus", "family", "gps", "pharma", "project"];
 function SpecimenSearchPage({
-  navParams
+  navParams,
+  extraSpec,
+  setExtraSpec,
+  gsLoading,
+  gsError,
+  reloadSpecimens
 }) {
   const GAS_URL = "https://script.google.com/macros/s/AKfycbxU1t6BC5NGzl9H3x4r_f6vRdu-9A3BWaVEyCmTmJkvwN2B0-iN5-nMUDRg-x8oGageyA/exec";
   const API_KEY = "jeju2026!";
 
-  // 전체 표본은 Supabase DB에서 로드됨
-  const [extraSpec, setExtraSpec] = useState(null); // DB에서 불러온 전체 표본
-  const [gsLoading, setGsLoading] = useState(false); // DB 로딩 중
-  const [gsError, setGsError] = useState(null); // DB 오류
+  // 전체 표본 데이터(extraSpec)는 이제 App에서 사이트가 열릴 때 한 번만
+  // 불러와서 props로 전달합니다. 이 페이지는 더 이상 마운트될 때마다
+  // Supabase를 재조회하지 않으므로, 다른 페이지로 이동했다가 돌아와도
+  // 즉시 표시되고 데이터가 사라지지 않습니다.
   const [query, setQuery] = useState("");
   // 대시보드 카드 클릭 시 전달된 수장고 필터를 초기값으로 사용 (예: "제1수장고 표본" 카드 → "1수장고")
   const [storageFilter, setStorageFilter] = useState(navParams?.storage || "전체");
@@ -8815,36 +8820,8 @@ function SpecimenSearchPage({
   const fileInputRef = useRef(null);
   const PAGE_SIZE = 30;
 
-  // ── 마운트 시 DB에서 전체 표본 불러오기 ──────────────────────
-  useEffect(() => {
-    loadFromSheets();
-  }, []);
-  const loadFromSheets = async () => {
-    setGsLoading(true);
-    setGsError(null);
-    try {
-      // 응답 payload 크기 제한(Netlify Functions ~6MB) 때문에
-      // 전체 데이터를 한 번에 받지 않고 페이지 단위(offset/limit)로 나눠서 불러온 뒤 합칩니다.
-      const PAGE = 1000;
-      let offset = 0;
-      let all = [];
-      while (true) {
-        const res = await fetch(`/.netlify/functions/get-specimens?offset=${offset}&limit=${PAGE}`);
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error || "불러오기 실패");
-        all = all.concat(json.data || []);
-        if (!json.hasMore) break;
-        offset += PAGE;
-      }
-      // DB 데이터: [[관리번호, 표본번호, ...], ...]
-      setExtraSpec(all);
-    } catch (e) {
-      setGsError("데이터베이스 연결 실패: " + e.message);
-      setExtraSpec([]);
-    } finally {
-      setGsLoading(false);
-    }
-  };
+  // 표본 데이터를 다시 불러오고 싶을 때(예: 업로드 후 새로고침 버튼) 사용
+  const loadFromSheets = reloadSpecimens;
 
   // 전체 표본은 이제 Supabase에 일괄 저장되어 있으므로 DB에서 불러온 값이 곧 전체 표본
   const allSpecimens = useCallback(() => {
@@ -11753,6 +11730,50 @@ function SpecimenModalWrapper() {
 function App() {
   const [page, setPage] = useState("home");
   const [navParams, setNavParams] = useState(null);
+
+  // ── 전체 표본 데이터: App 최상단에서 한 번만 관리 ──────────────────
+  // 이전에는 "제주 센터 표본" 페이지에 들어갈 때마다 Supabase에서 다시
+  // 불러왔기 때문에, 페이지를 이동했다가 돌아오면 매번 로딩이 반복되고
+  // 속도가 느리게 느껴졌습니다.
+  // 이제는 App이 처음 렌더링될 때(사이트가 열릴 때) 딱 한 번 전체 표본을
+  // 불러와서 App 상태로 보관하고, 하위 페이지들은 이 데이터를 props로
+  // 전달받아 사용합니다. App은 페이지 전환 시 사라지지 않으므로, 다른
+  // 페이지로 이동했다가 돌아와도 데이터가 그대로 남아있고 재요청하지
+  // 않습니다.
+  const [allSpecimens, setAllSpecimens] = useState(null); // DB에서 불러온 전체 표본
+  const [specimensLoading, setSpecimensLoading] = useState(false); // DB 로딩 중
+  const [specimensError, setSpecimensError] = useState(null); // DB 오류
+  const loadAllSpecimens = useCallback(async () => {
+    setSpecimensLoading(true);
+    setSpecimensError(null);
+    try {
+      // 응답 payload 크기 제한(Netlify Functions ~6MB) 때문에
+      // 전체 데이터를 한 번에 받지 않고 페이지 단위(offset/limit)로 나눠서 불러온 뒤 합칩니다.
+      const PAGE = 1000;
+      let offset = 0;
+      let all = [];
+      while (true) {
+        const res = await fetch(`/.netlify/functions/get-specimens?offset=${offset}&limit=${PAGE}`);
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || "불러오기 실패");
+        all = all.concat(json.data || []);
+        if (!json.hasMore) break;
+        offset += PAGE;
+      }
+      // DB 데이터: [[관리번호, 표본번호, ...], ...]
+      setAllSpecimens(all);
+    } catch (e) {
+      setSpecimensError("데이터베이스 연결 실패: " + e.message);
+      setAllSpecimens([]);
+    } finally {
+      setSpecimensLoading(false);
+    }
+  }, []);
+  // 사이트가 처음 열릴 때(=App 최초 렌더링 시) 자동으로 전체 표본을 불러옵니다.
+  useEffect(() => {
+    loadAllSpecimens();
+  }, [loadAllSpecimens]);
+
   // 대시보드 카드 등에서 페이지 이동과 함께 필터 조건을 함께 전달하기 위한 헬퍼
   const nav = (id, params) => {
     setPage(id);
@@ -11867,7 +11888,12 @@ function App() {
   }, page === "home" && /*#__PURE__*/React.createElement(HomePage, {
     onNav: nav
   }), page === "pharma-search" && /*#__PURE__*/React.createElement(PharmaSearchPage, null), page === "specimen-search" && /*#__PURE__*/React.createElement(SpecimenSearchPage, {
-    navParams: navParams
+    navParams: navParams,
+    extraSpec: allSpecimens,
+    setExtraSpec: setAllSpecimens,
+    gsLoading: specimensLoading,
+    gsError: specimensError,
+    reloadSpecimens: loadAllSpecimens
   }), page === "species" && /*#__PURE__*/React.createElement(SpeciesPage, {
     navParams: navParams
   }), page === "map" && /*#__PURE__*/React.createElement(MapPage, null), page === "pharma" && /*#__PURE__*/React.createElement(PharmaStatsPage, null), page === "specimen" && /*#__PURE__*/React.createElement(SpecimenStatsPage, null)), /*#__PURE__*/React.createElement("footer", {
