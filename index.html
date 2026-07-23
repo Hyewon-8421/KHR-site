@@ -178,7 +178,7 @@ function SpecimenPhotoGallery({ id, editable }) {
     error && React.createElement("div", { style: { fontSize: 12, color: "#c0392b", padding: "10px 0" } }, "사진 목록을 불러오지 못했습니다: " + error),
     !loading && !error && photos.length === 0 && React.createElement("div", {
       style: { fontSize: 12, color: "#bdc3c7", padding: "14px 0", textAlign: "center", background: "#fafcfa", borderRadius: 8, border: "1px dashed #e0e8e2" }
-    }, "등록된 스캔 사진이 없습니다."),
+    }, "등록된 이미지 없음"),
     photos.length > 0 && React.createElement("div", {
       style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }
     }, photos.map(p => React.createElement("div", {
@@ -8263,7 +8263,8 @@ const pct = (n, t) => (n / t * 100).toFixed(1) + "%";
 // ─── 모달 컴포넌트 ────────────────────────────────────────────────────────────
 function Modal({
   children,
-  onClose
+  onClose,
+  maxWidth
 }) {
   useEffect(() => {
     const handler = e => {
@@ -8289,7 +8290,7 @@ function Modal({
     style: {
       background: "#fff",
       borderRadius: 16,
-      maxWidth: 680,
+      maxWidth: maxWidth || 680,
       width: "100%",
       maxHeight: "85vh",
       overflowY: "auto",
@@ -8516,7 +8517,7 @@ function SpecimenModal({
         })
   );
 
-  return /*#__PURE__*/React.createElement(Modal, { onClose },
+  return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: editMode ? 680 : 920 },
     React.createElement("div", { style: { padding: "22px 24px 0" } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 } },
         React.createElement("div", null,
@@ -8580,28 +8581,41 @@ function SpecimenModal({
           ),
         )
       : React.createElement("div", { style: { padding: "0 24px 24px" } },
-          React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", paddingTop: 14, borderTop: "1px solid #eef2f5", marginTop: 14 } },
-            React.createElement("tbody", null,
-              [["관리번호", id], ["표본번호", specNo], ["수장고", storage], ["수장위치", location],
-               ["수집날짜", collectDate], ["수집장소", collectPlace], ["수집 과제", project], ["GPS 좌표", gps]]
-                .filter(([, v]) => v)
-                .map(([k, v]) => React.createElement("tr", { key: k },
-                  React.createElement("td", { style: { padding: "7px 0", color: "#7f8c8d", fontSize: 13, whiteSpace: "nowrap", paddingRight: 20, verticalAlign: "top", minWidth: 80 } }, k),
-                  React.createElement("td", { style: { padding: "7px 0", color: "#1a2e1a", fontSize: 13, wordBreak: "break-all" } }, v)
-                ))
-            )
+          // 표본 정보(좌측)와 스캔 사진(우측)을 나란히 배치 — 사진이 하단으로 밀려 눈에 잘 안 띄던 문제 개선.
+          // 모달 폭이 좁아지면(모바일 등) flexWrap으로 자동으로 아래에 배치된다.
+          React.createElement("div", {
+            style: {
+              display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap",
+              paddingTop: 14, borderTop: "1px solid #eef2f5", marginTop: 14,
+            }
+          },
+            React.createElement("div", { style: { flex: "1 1 320px", minWidth: 260 } },
+              React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
+                React.createElement("tbody", null,
+                  [["관리번호", id], ["표본번호", specNo], ["수장고", storage], ["수장위치", location],
+                   ["수집날짜", collectDate], ["수집장소", collectPlace], ["수집 과제", project], ["GPS 좌표", gps]]
+                    .filter(([, v]) => v)
+                    .map(([k, v]) => React.createElement("tr", { key: k },
+                      React.createElement("td", { style: { padding: "7px 0", color: "#7f8c8d", fontSize: 13, whiteSpace: "nowrap", paddingRight: 20, verticalAlign: "top", minWidth: 80 } }, k),
+                      React.createElement("td", { style: { padding: "7px 0", color: "#1a2e1a", fontSize: 13, wordBreak: "break-all" } }, v)
+                    ))
+                )
+              ),
+              gps && gps.includes(",") && !gps.includes("-") && (() => {
+                const [lat, lng] = gps.split(",").map(s => s.trim());
+                const mapUrl = `https://maps.google.com/maps?q=${lat},${lng}&z=12&output=embed`;
+                return React.createElement("div", { style: { marginTop: 14 } },
+                  React.createElement("div", { style: { fontSize: 12, color: "#95a5a6", marginBottom: 7 } }, "수집 위치"),
+                  React.createElement("div", { style: { borderRadius: 9, overflow: "hidden", border: "1px solid #eef2f5", height: 180 } },
+                    React.createElement("iframe", { src: mapUrl, width: "100%", height: "180", style: { border: "none", display: "block" }, loading: "lazy", title: "map" })
+                  )
+                );
+              })(),
+            ),
+            React.createElement("div", { style: { flex: "1 1 260px", minWidth: 240, maxWidth: 340 } },
+              React.createElement(SpecimenPhotoGallery, { id, editable: false })
+            ),
           ),
-          gps && gps.includes(",") && !gps.includes("-") && (() => {
-            const [lat, lng] = gps.split(",").map(s => s.trim());
-            const mapUrl = `https://maps.google.com/maps?q=${lat},${lng}&z=12&output=embed`;
-            return React.createElement("div", { style: { marginTop: 14 } },
-              React.createElement("div", { style: { fontSize: 12, color: "#95a5a6", marginBottom: 7 } }, "수집 위치"),
-              React.createElement("div", { style: { borderRadius: 9, overflow: "hidden", border: "1px solid #eef2f5", height: 180 } },
-                React.createElement("iframe", { src: mapUrl, width: "100%", height: "180", style: { border: "none", display: "block" }, loading: "lazy", title: "map" })
-              )
-            );
-          })(),
-          React.createElement(SpecimenPhotoGallery, { id, editable: false }),
         ),
   );
 }
