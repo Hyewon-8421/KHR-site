@@ -8823,11 +8823,21 @@ function SpecimenSearchPage({
     setGsLoading(true);
     setGsError(null);
     try {
-      const res = await fetch("/.netlify/functions/get-specimens");
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "불러오기 실패");
+      // 응답 payload 크기 제한(Netlify Functions ~6MB) 때문에
+      // 전체 데이터를 한 번에 받지 않고 페이지 단위(offset/limit)로 나눠서 불러온 뒤 합칩니다.
+      const PAGE = 1000;
+      let offset = 0;
+      let all = [];
+      while (true) {
+        const res = await fetch(`/.netlify/functions/get-specimens?offset=${offset}&limit=${PAGE}`);
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || "불러오기 실패");
+        all = all.concat(json.data || []);
+        if (!json.hasMore) break;
+        offset += PAGE;
+      }
       // DB 데이터: [[관리번호, 표본번호, ...], ...]
-      setExtraSpec(json.data || []);
+      setExtraSpec(all);
     } catch (e) {
       setGsError("데이터베이스 연결 실패: " + e.message);
       setExtraSpec([]);
