@@ -8032,230 +8032,184 @@ const PHARMA_DATA = [{
   "type": "KHP"
 }];
 
-// ─── 통계 데이터 ────────────────────────────────────────────────────────────
-const STATS = {
-  summary: {
-    pharmacopoeia: {
-      total: 443,
-      origins: 558,
-      originNote: "버섯 8종 포함"
-    },
-    specimens: {
-      total: 20134,
-      species: 1117
-    },
-    specimenPharm: {
-      total: 20134,
-      kp: 4586,
-      khp: 7366,
-      both: 11952,
-      none: 8182,
-      kpPct: 22.8,
-      khpPct: 36.6,
-      bothPct: 59.4,
-      nonePct: 40.6
-    },
-    speciesPharm: {
-      total: 1117,
-      kp: 157,
-      khp: 289,
-      both: 446,
-      none: 671,
-      kpPct: 14.1,
-      khpPct: 25.9,
-      bothPct: 39.9,
-      nonePct: 60.1
+// ─── 통계 데이터 (표본 데이터로부터 동적 계산) ──────────────────────────────
+// 예전에는 이 통계가 최초 표본 20,134건 기준으로 정적으로 계산되어 있었지만,
+// 이제 Supabase에서 불러온 전체 표본을 기준으로 매번 다시 계산한다.
+// App이 표본을 불러올 때마다 window.__STATS__를 갱신하고, HomePage/SpecimenStatsPage는
+// 그 값을 읽어서 화면에 표시한다.
+
+const GRADE_LABELS = {
+  "A1": "공정서 등재 핵심 생약",
+  "A2": "동속 근연 핵심 생약",
+  "B1": "공정서 등재 일반 생약",
+  "B2-1": "기타 분류 I",
+  "B2-2": "기타 분류 II",
+  "B2-3": "기타 분류 III",
+  "B2-4": "기타 분류 IV"
+};
+
+function pctOf(n, total) {
+  return total > 0 ? Math.round((n / total) * 1000) / 10 : 0;
+}
+
+function computeStatsFromSpecimens(specimens, pharmaData) {
+  pharmaData = pharmaData || [];
+  specimens = specimens || [];
+
+  let originsList = [];
+  pharmaData.forEach(entry => {
+    (entry.origins || []).forEach(o => originsList.push(o));
+  });
+  const pharmaMap = {};
+  originsList.forEach(o => {
+    const key = (o.sciName || "").trim();
+    if (!key) return;
+    if (!pharmaMap[key]) pharmaMap[key] = new Set();
+    if (o.type) pharmaMap[key].add(o.type);
+  });
+  function pharmaOf(sciName) {
+    const set = pharmaMap[(sciName || "").trim()];
+    if (!set || set.size === 0) return "미등재";
+    if (set.has("KP") && set.has("KHP")) return "KP, KHP";
+    if (set.has("KP")) return "KP";
+    if (set.has("KHP")) return "KHP";
+    return "미등재";
+  }
+
+  function uniqueSpecies(rows) {
+    const set = new Set();
+    rows.forEach(r => { const s = (r[6] || "").trim(); if (s) set.add(s); });
+    return set;
+  }
+
+  function specimenLevelStats(rows) {
+    let kp = 0, khp = 0, combined = 0, none = 0;
+    rows.forEach(r => {
+      const p = pharmaOf(r[6]);
+      if (p === "KP") kp++;
+      else if (p === "KHP") khp++;
+      else if (p === "KP, KHP") combined++;
+      else none++;
+    });
+    const both = kp + khp + combined; // KP 또는 KHP(또는 둘 다)에 등재된 개체 수
+    const total = rows.length;
+    return { total, kp, khp, both, none, kpPct: pctOf(kp, total), khpPct: pctOf(khp, total), bothPct: pctOf(both, total), nonePct: pctOf(none, total) };
+  }
+
+  function speciesLevelStats(rows) {
+    const speciesSet = uniqueSpecies(rows);
+    let kp = 0, khp = 0, combined = 0, none = 0;
+    speciesSet.forEach(sci => {
+      const p = pharmaOf(sci);
+      if (p === "KP") kp++;
+      else if (p === "KHP") khp++;
+      else if (p === "KP, KHP") combined++;
+      else none++;
+    });
+    const total = speciesSet.size;
+    const both = kp + khp + combined;
+    return { total, kp, khp, both, none, kpPct: pctOf(kp, total), khpPct: pctOf(khp, total), bothPct: pctOf(both, total), nonePct: pctOf(none, total) };
+  }
+
+  function topFamiliesOf(rows, n) {
+    const counts = new Map();
+    rows.forEach(r => {
+      const fam = (r[11] || "").trim();
+      if (!fam) return;
+      counts.set(fam, (counts.get(fam) || 0) + 1);
+    });
+    return Array.from(counts.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count).slice(0, n);
+  }
+
+  function importanceOf(rows) {
+    const counts = new Map();
+    rows.forEach(r => {
+      const grade = (r[9] || "").trim();
+      if (!grade) return;
+      counts.set(grade, (counts.get(grade) || 0) + 1);
+    });
+    return Array.from(counts.entries()).map(([grade, count]) => ({ grade, label: GRADE_LABELS[grade] || grade, count })).sort((a, b) => b.count - a.count);
+  }
+
+  const storage1Rows = specimens.filter(r => (r[2] || "").includes("1수장고"));
+  const storage3Rows = specimens.filter(r => (r[2] || "").includes("3수장고"));
+
+  const allSpeciesSet = uniqueSpecies(specimens);
+  const specimenPharmAll = specimenLevelStats(specimens);
+  const speciesPharmAll = speciesLevelStats(specimens);
+  const speciesPharmS1 = speciesLevelStats(storage1Rows);
+  const speciesPharmS3 = speciesLevelStats(storage3Rows);
+  const specimenPharmS1 = specimenLevelStats(storage1Rows);
+  const specimenPharmS3 = specimenLevelStats(storage3Rows);
+
+  // 공정서 원료(학명) 커버리지: 전체 원료 항목(origins) 중 표본으로 실제 확보된 항목 비율
+  let coveredOrigins = 0;
+  originsList.forEach(o => {
+    const sci = (o.sciName || "").trim();
+    if (sci && allSpeciesSet.has(sci)) coveredOrigins++;
+  });
+  const totalOrigins = originsList.length;
+
+  return {
+    summary: {
+      pharmacopoeia: {
+        total: pharmaData.length,
+        origins: totalOrigins,
+        originNote: ""
+      },
+      specimens: {
+        total: specimens.length,
+        species: allSpeciesSet.size
+      },
+      specimenPharm: specimenPharmAll,
+      speciesPharm: speciesPharmAll,
+      storage1: {
+        species: speciesPharmS1.total,
+        kp: speciesPharmS1.kp,
+        khp: speciesPharmS1.khp,
+        both: speciesPharmS1.both,
+        none: speciesPharmS1.none,
+        bothPct: speciesPharmS1.bothPct
+      },
+      storage3: {
+        species: speciesPharmS3.total,
+        kp: speciesPharmS3.kp,
+        khp: speciesPharmS3.khp,
+        both: speciesPharmS3.both,
+        none: speciesPharmS3.none,
+        bothPct: speciesPharmS3.bothPct
+      },
+      originCoverage: {
+        total: totalOrigins,
+        covered: coveredOrigins,
+        notCovered: totalOrigins - coveredOrigins,
+        coveredPct: pctOf(coveredOrigins, totalOrigins)
+      }
     },
     storage1: {
-      species: 958,
-      kp: 156,
-      khp: 286,
-      both: 442,
-      none: 516,
-      bothPct: 46.1
+      total: storage1Rows.length,
+      species: speciesPharmS1.total,
+      kp: specimenPharmS1.kp,
+      khp: specimenPharmS1.khp,
+      both: specimenPharmS1.both,
+      none: specimenPharmS1.none,
+      topFamilies: topFamiliesOf(storage1Rows, 15),
+      importance: importanceOf(storage1Rows)
     },
     storage3: {
-      species: 429,
-      kp: 44,
-      khp: 83,
-      both: 127,
-      none: 302,
-      bothPct: 29.6
-    },
-    originCoverage: {
-      total: 558,
-      covered: 309,
-      notCovered: 249,
-      coveredPct: 55.4
+      total: storage3Rows.length,
+      species: speciesPharmS3.total,
+      kp: specimenPharmS3.kp,
+      khp: specimenPharmS3.khp,
+      both: specimenPharmS3.both,
+      none: specimenPharmS3.none,
+      topFamilies: topFamiliesOf(storage3Rows, 15),
+      importance: importanceOf(storage3Rows)
     }
-  },
-  storage1: {
-    total: 19321,
-    species: 968,
-    kp: 4097,
-    khp: 6804,
-    both: 10907,
-    none: 8414,
-    topFamilies: [{
-      name: "장미과",
-      count: 1846
-    }, {
-      name: "국화과",
-      count: 1570
-    }, {
-      name: "꿀풀과",
-      count: 781
-    }, {
-      name: "마디풀과",
-      count: 717
-    }, {
-      name: "콩과",
-      count: 694
-    }, {
-      name: "미나리아재비과",
-      count: 476
-    }, {
-      name: "제비꽃과",
-      count: 455
-    }, {
-      name: "미나리과",
-      count: 446
-    }, {
-      name: "운향과",
-      count: 430
-    }, {
-      name: "아스파라거스과",
-      count: 406
-    }, {
-      name: "물푸레나무과",
-      count: 394
-    }, {
-      name: "인동과",
-      count: 376
-    }, {
-      name: "뽕나무과",
-      count: 349
-    }, {
-      name: "참나무과",
-      count: 325
-    }, {
-      name: "노박덩굴과",
-      count: 324
-    }],
-    importance: [{
-      grade: "A1",
-      label: "공정서 등재 핵심 생약",
-      count: 9785
-    }, {
-      grade: "B1",
-      label: "공정서 등재 일반 생약",
-      count: 5651
-    }, {
-      grade: "B2-1",
-      label: "기타 분류 I",
-      count: 2304
-    }, {
-      grade: "A2",
-      label: "동속 근연 핵심 생약",
-      count: 1122
-    }, {
-      grade: "B2-4",
-      label: "기타 분류 IV",
-      count: 280
-    }, {
-      grade: "B2-2",
-      label: "기타 분류 II",
-      count: 35
-    }, {
-      grade: "B2-3",
-      label: "기타 분류 III",
-      count: 4
-    }]
-  },
-  storage3: {
-    total: 813,
-    species: 438,
-    kp: 194,
-    khp: 15,
-    both: 214,
-    none: 599,
-    topFamilies: [{
-      name: "국화과",
-      count: 57
-    }, {
-      name: "꿀풀과",
-      count: 46
-    }, {
-      name: "콩과",
-      count: 39
-    }, {
-      name: "벼과",
-      count: 36
-    }, {
-      name: "미나리아재비과",
-      count: 31
-    }, {
-      name: "아스파라거스과",
-      count: 30
-    }, {
-      name: "장미과",
-      count: 28
-    }, {
-      name: "대극과",
-      count: 23
-    }, {
-      name: "녹나무과",
-      count: 21
-    }, {
-      name: "미나리과",
-      count: 19
-    }, {
-      name: "관중과",
-      count: 17
-    }, {
-      name: "박과",
-      count: 17
-    }, {
-      name: "마디풀과",
-      count: 15
-    }, {
-      name: "운향과",
-      count: 15
-    }, {
-      name: "사초과",
-      count: 14
-    }],
-    importance: [{
-      grade: "B1",
-      label: "공정서 등재 일반 생약",
-      count: 237
-    }, {
-      grade: "A1",
-      label: "공정서 등재 핵심 생약",
-      count: 193
-    }, {
-      grade: "B2-1",
-      label: "기타 분류 I",
-      count: 79
-    }, {
-      grade: "B2-4",
-      label: "기타 분류 IV",
-      count: 65
-    }, {
-      grade: "A2",
-      label: "동속 근연 핵심 생약",
-      count: 13
-    }, {
-      grade: "B2-2",
-      label: "기타 분류 II",
-      count: 6
-    }, {
-      grade: "B2-3",
-      label: "기타 분류 III",
-      count: 6
-    }]
-  }
-};
+  };
+}
+window.__STATS__ = computeStatsFromSpecimens([], window.__PHARMA__); // 표본 로딩 전 기본값(0으로 채워진 형태) 확보
+;
 const fmt = n => n?.toLocaleString("ko-KR");
 const pct = (n, t) => (n / t * 100).toFixed(1) + "%";
 
@@ -9866,7 +9820,7 @@ function LegendItem({
 function HomePage({
   onNav
 }) {
-  const s = STATS.summary;
+  const s = window.__STATS__.summary;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       background: "linear-gradient(135deg,#0f3d22,#1a6b3e)",
@@ -10369,7 +10323,7 @@ function PharmaStatsPage() {
 // ─── 표본 통계 페이지 ─────────────────────────────────────────────────────────
 function SpecimenStatsPage() {
   const [tab, setTab] = useState("overview");
-  const s = STATS.summary;
+  const s = window.__STATS__.summary;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SectionHeader, {
     title: "제주센터 표본 현황 통계",
     sub: "국립생약자원관 제주 센터 수장 표본 현황 — 총 20,134점",
@@ -10580,7 +10534,7 @@ function SpecimenStatsPage() {
       marginTop: 10
     }
   }, "* 동속 근연 포함 기준"))), (tab === "s1" || tab === "s3") && (() => {
-    const data = tab === "s1" ? STATS.storage1 : STATS.storage3;
+    const data = tab === "s1" ? window.__STATS__.storage1 : window.__STATS__.storage3;
     const color = tab === "s1" ? "#1a6b3e" : "#1a4a7a";
     const maxFam = Math.max(...data.topFamilies.map(f => f.count));
     const maxImp = Math.max(...data.importance.map(i => i.count));
@@ -11938,6 +11892,7 @@ function App() {
     if (allSpecimens) {
       window.__SPEC__ = allSpecimens;
       window.__SPECIES__ = computeSpeciesFromSpecimens(allSpecimens, window.__PHARMA__);
+      window.__STATS__ = computeStatsFromSpecimens(allSpecimens, window.__PHARMA__);
     }
   }, [allSpecimens]);
 
