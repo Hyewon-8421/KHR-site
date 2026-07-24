@@ -93,7 +93,7 @@ exports.handler = async function(event, context) {
         : "resolution=ignore-duplicates,return=minimal";
 
       const result = await httpsPost(
-        `${SUPABASE_URL}/rest/v1/specimens`,
+        `${SUPABASE_URL}/rest/v1/specimens?on_conflict=${encodeURIComponent("관리번호")}`,
         {
           "apikey": SUPABASE_KEY,
           "Authorization": `Bearer ${SUPABASE_KEY}`,
