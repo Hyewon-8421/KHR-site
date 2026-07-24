@@ -9825,6 +9825,7 @@ function HomePage({
   onNav
 }) {
   const s = window.__STATS__.summary;
+  const st = window.__STATS__;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       background: "linear-gradient(135deg,#0f3d22,#1a6b3e)",
@@ -9864,38 +9865,38 @@ function HomePage({
     }
   }, /*#__PURE__*/React.createElement(StatCard, {
     label: "총 표본 수",
-    value: "20,134점",
+    value: `${fmt(s.specimens.total)}점`,
     sub: "제주센터 전체",
     accent: "#1a6b3e",
     onClick: () => onNav("specimen-search")
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "총 식물종 수",
-    value: "1,117종",
+    value: `${fmt(s.specimens.species)}종`,
     sub: "기원종 기준",
     accent: "#1a6b3e",
     onClick: () => onNav("species", { tab: "all" })
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "공정서 식물류 생약",
-    value: "443종",
+    value: `${fmt(s.pharmacopoeia.total)}종`,
     sub: "KP + KHP 통합",
     accent: "#2563a6",
     onClick: () => onNav("pharma-search")
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "공정서 기원종",
-    value: "558종",
+    value: `${fmt(s.pharmacopoeia.origins)}종`,
     sub: "버섯 8종 포함",
     accent: "#2563a6",
     onClick: () => onNav("pharma")
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "제1수장고 표본",
-    value: "19,321점",
-    sub: "968 기원종",
+    value: `${fmt(st.storage1.total)}점`,
+    sub: `${fmt(s.storage1.species)} 기원종`,
     accent: "#2d9c63",
     onClick: () => onNav("specimen-search", { storage: "1수장고" })
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "제3수장고 표본",
-    value: "813점",
-    sub: "438 기원종",
+    value: `${fmt(st.storage3.total)}점`,
+    sub: `${fmt(s.storage3.species)} 기원종`,
     accent: "#1a4a7a",
     onClick: () => onNav("specimen-search", { storage: "3수장고" })
   })), /*#__PURE__*/React.createElement("div", {
@@ -9906,7 +9907,7 @@ function HomePage({
       marginBottom: 24
     }
   }, /*#__PURE__*/React.createElement(Section, {
-    title: "표본 공정서 등재율 (20,134점)"
+    title: `표본 공정서 등재율 (${fmt(s.specimens.total)}점)`
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -9943,7 +9944,7 @@ function HomePage({
     value: `${fmt(s.specimenPharm.none)}점`,
     border: true
   })))), /*#__PURE__*/React.createElement(Section, {
-    title: "식물종 공정서 등재율 (1,117종)"
+    title: `식물종 공정서 등재율 (${fmt(s.specimens.species)}종)`
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -9980,7 +9981,7 @@ function HomePage({
     value: `${fmt(s.speciesPharm.none)}종`,
     border: true
   }))))), /*#__PURE__*/React.createElement(Section, {
-    title: "공정서 기원종 558종 중 제주센터 보유율",
+    title: `공정서 기원종 ${fmt(s.originCoverage.total)}종 중 제주센터 보유율`,
     style: {
       marginBottom: 24
     }
@@ -10006,11 +10007,11 @@ function HomePage({
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e67e22",
     label: "보유",
-    value: "309종 (55.4%)"
+    value: `${fmt(s.originCoverage.covered)}종 (${s.originCoverage.coveredPct}%)`
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미보유",
-    value: "249종 (44.6%)",
+    value: `${fmt(s.originCoverage.notCovered)}종 (${(100 - s.originCoverage.coveredPct).toFixed(1)}%)`,
     border: true
   }), /*#__PURE__*/React.createElement("p", {
     style: {
@@ -10025,11 +10026,11 @@ function HomePage({
       color: "#546e7a",
       lineHeight: 1.7
     }
-  }, "공정서 등재 식물 유래 기원종 ", /*#__PURE__*/React.createElement("b", null, "558종"), " 중 ", /*#__PURE__*/React.createElement("b", {
+  }, "공정서 등재 식물 유래 기원종 ", /*#__PURE__*/React.createElement("b", null, `${fmt(s.originCoverage.total)}종`), " 중 ", /*#__PURE__*/React.createElement("b", {
     style: {
       color: "#e67e22"
     }
-  }, "309종(55.4%)"), "을 표본으로 보유. 나머지 249종 추가 수집 진행 중."))), /*#__PURE__*/React.createElement("h3", {
+  }, `${fmt(s.originCoverage.covered)}종(${s.originCoverage.coveredPct}%)`), `을 표본으로 보유. 나머지 ${fmt(s.originCoverage.notCovered)}종 추가 수집 진행 중.`))), /*#__PURE__*/React.createElement("h3", {
     style: {
       fontSize: 15,
       fontWeight: 700,
@@ -10046,22 +10047,22 @@ function HomePage({
     id: "pharma-search",
     icon: "📋",
     title: "공정서 생약 검색",
-    desc: "KP·KHP 등재 446종 생약 전체 검색 및 기원종 상세 조회",
-    stats: ["446종 생약", "672개 기원종"],
+    desc: `KP·KHP 등재 ${fmt(s.pharmacopoeia.total)}종 생약 전체 검색 및 기원종 상세 조회`,
+    stats: [`${fmt(s.pharmacopoeia.total)}종 생약`, `${fmt(s.pharmacopoeia.origins)}개 기원종`],
     color: "#2563a6"
   }, {
     id: "specimen-search",
     icon: "🌱",
     title: "제주 센터 표본",
-    desc: "전체 20,134점 표본 검색 — 수장고·과명·공정서 필터 및 신규 표본 업로드",
-    stats: ["20,134점", "1,117종"],
+    desc: `전체 ${fmt(s.specimens.total)}점 표본 검색 — 수장고·과명·공정서 필터 및 신규 표본 업로드`,
+    stats: [`${fmt(s.specimens.total)}점`, `${fmt(s.specimens.species)}종`],
     color: "#1a6b3e"
   }, {
     id: "species",
     icon: "🌿",
     title: "식물종 정보",
     desc: "수집 표본의 식물종 목록 — 전체·제1수장고·제3수장고별 조회 및 공정서 등재 현황",
-    stats: ["1,117종 전체", "958종 제1수장고", "430종 제3수장고"]
+    stats: [`${fmt(s.specimens.species)}종 전체`, `${fmt(s.storage1.species)}종 제1수장고`, `${fmt(s.storage3.species)}종 제3수장고`]
   }, {
     id: "map",
     icon: "🗺",
@@ -10081,7 +10082,7 @@ function HomePage({
     icon: "📦",
     title: "표본 현황 통계",
     desc: "제1·3수장고별 분포, 중요도, 공정서 등재율",
-    stats: ["제1수장고 19,321점", "제3수장고 813점"],
+    stats: [`제1수장고 ${fmt(st.storage1.total)}점`, `제3수장고 ${fmt(st.storage3.total)}점`],
     color: "#1a6b3e"
   }].map(c => /*#__PURE__*/React.createElement(NavCard, {
     key: c.id,
@@ -10282,7 +10283,7 @@ function PharmaStatsPage() {
     total: total,
     color: `hsl(140,${60 - i * 3}%,${35 + i * 3}%)`
   })))), /*#__PURE__*/React.createElement(Section, {
-    title: "제주센터의 공정서 기원종 558종 보유 현황",
+    title: `제주센터의 공정서 기원종 ${fmt(window.__STATS__.summary.originCoverage.total)}종 보유 현황`,
     style: {
       marginTop: 18
     }
@@ -10295,10 +10296,10 @@ function PharmaStatsPage() {
     }
   }, /*#__PURE__*/React.createElement(DonutChart, {
     segments: [{
-      pct: 55.4,
+      pct: window.__STATS__.summary.originCoverage.coveredPct,
       color: "#2563a6"
     }, {
-      pct: 44.6,
+      pct: 100 - window.__STATS__.summary.originCoverage.coveredPct,
       color: "#e8eded"
     }],
     size: 140
@@ -10309,11 +10310,11 @@ function PharmaStatsPage() {
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#2563a6",
     label: "표본 보유",
-    value: "309종 (55.4%)"
+    value: `${fmt(window.__STATS__.summary.originCoverage.covered)}종 (${window.__STATS__.summary.originCoverage.coveredPct}%)`
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미보유",
-    value: "249종 (44.6%)",
+    value: `${fmt(window.__STATS__.summary.originCoverage.notCovered)}종 (${(100 - window.__STATS__.summary.originCoverage.coveredPct).toFixed(1)}%)`,
     border: true
   }), /*#__PURE__*/React.createElement("p", {
     style: {
@@ -10328,9 +10329,10 @@ function PharmaStatsPage() {
 function SpecimenStatsPage() {
   const [tab, setTab] = useState("overview");
   const s = window.__STATS__.summary;
+  const st = window.__STATS__;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SectionHeader, {
     title: "제주센터 표본 현황 통계",
-    sub: "국립생약자원관 제주 센터 수장 표본 현황 — 총 20,134점",
+    sub: `국립생약자원관 제주 센터 수장 표본 현황 — 총 ${fmt(s.specimens.total)}점`,
     color: "#1a6b3e"
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -10371,21 +10373,21 @@ function SpecimenStatsPage() {
     }
   }, /*#__PURE__*/React.createElement(StatCard, {
     label: "전체 표본",
-    value: "20,134점",
+    value: `${fmt(s.specimens.total)}점`,
     accent: "#1a6b3e"
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "전체 식물종",
-    value: "1,117종",
+    value: `${fmt(s.specimens.species)}종`,
     accent: "#1a6b3e"
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "제1수장고",
-    value: "19,321점",
-    sub: "968 기원종",
+    value: `${fmt(st.storage1.total)}점`,
+    sub: `${fmt(s.storage1.species)} 기원종`,
     accent: "#2d9c63"
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "제3수장고",
-    value: "813점",
-    sub: "438 기원종",
+    value: `${fmt(st.storage3.total)}점`,
+    sub: `${fmt(s.storage3.species)} 기원종`,
     accent: "#1a4a7a"
   })), /*#__PURE__*/React.createElement("div", {
     style: {
