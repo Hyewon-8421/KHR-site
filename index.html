@@ -8900,7 +8900,11 @@ function SpecimenSearchPage({
         const VALID_STORAGE = ["1수장고", "3수장고"];
         let errors = [];
         const base = window.__SPEC__ || [];
-        const existingIds = new Set([...base.map(s => s[0]), ...(extraSpec || []).map(s => s[0])]);
+        // DB에 이미 존재하는 관리번호 목록 (추가 모드에서 중복 스킵 판단용)
+        const dbExistingIds = new Set([...base.map(s => s[0]), ...(extraSpec || []).map(s => s[0])]);
+        // 같은 업로드 파일 안에서 관리번호가 중복되는지 별도로 추적 (모드와 무관하게 항상 걸러야 함:
+        // 한 번의 저장 요청 안에 같은 관리번호가 두 번 들어가면 DB 저장 시 충돌이 나기 때문)
+        const seenInFile = new Set();
         const newRows = [];
         rows.forEach((row, i) => {
           const rowNum = i + 3;
@@ -8916,8 +8920,14 @@ function SpecimenSearchPage({
             return;
           }
           const id = String(row["관리번호"]).trim();
-          if (existingIds.has(id)) {
-            errors.push(`행 ${rowNum}: 관리번호 '${id}' 중복`);
+          if (seenInFile.has(id)) {
+            errors.push(`행 ${rowNum}: 관리번호 '${id}' 파일 내 중복`);
+            return;
+          }
+          // 추가 모드일 때만 기존 관리번호를 건너뜀. 수정 모드에서는 기존 관리번호여야
+          // 오히려 정상적으로 업데이트 대상이 되므로 건너뛰지 않고 그대로 전송한다.
+          if (!isUpsertMode && dbExistingIds.has(id)) {
+            errors.push(`행 ${rowNum}: 관리번호 '${id}' 이미 존재 (건너뜀)`);
             return;
           }
           let dateStr = "";
@@ -8926,7 +8936,7 @@ function SpecimenSearchPage({
             dateStr = d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10);
           }
           newRows.push([id, String(row["표본번호"] || "").trim(), String(row["수장고"]).trim(), String(row["수장위치"] || "").trim(), String(row["생약명"] || "").trim(), String(row["국명"]).trim(), String(row["학명"]).trim(), dateStr, String(row["수집장소"] || "").trim(), String(row["중요도"] || "").trim(), String(row["속명"] || "").trim(), String(row["과명"] || "").trim(), String(row["GPS"] || "").trim(), String(row["공정서"] || "").trim(), String(row["과제명"] || "").trim()]);
-          existingIds.add(id);
+          seenInFile.add(id);
         });
         if (newRows.length === 0) {
           setUploadState("done");
@@ -8939,32 +8949,64 @@ function SpecimenSearchPage({
         }
 
         // DB에 저장
+        // 한 번에 너무 많은 행(수천~수만 건)을 보내면 Netlify Function의 실행 시간
+        // 제한에 걸려 502 Bad Gateway가 발생할 수 있다. 그래서 여기서 먼저
+        // SAVE_BATCH 건씩 나눠 여러 번의 짧은 요청으로 순차 전송한다.
         setSyncState("syncing");
         setUploadState("syncing");
+        const SAVE_BATCH = 500;
+        let totalAdded = 0;
         try {
-          // Netlify Function을 통해 저장 (CORS 문제 없음)
-          const res = await fetch("/.netlify/functions/save-specimens", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ apiKey: "jeju2026!", rows: newRows, upsert: isUpsertMode }),
-          });
-          const json = await res.json();
-          if (!json.ok) throw new Error(json.error || "저장 실패");
+          for (let i = 0; i < newRows.length; i += SAVE_BATCH) {
+            const batch = newRows.slice(i, i + SAVE_BATCH);
+            const batchNo = Math.floor(i / SAVE_BATCH) + 1;
+            const totalBatches = Math.ceil(newRows.length / SAVE_BATCH);
+            setUploadResult({
+              added: totalAdded,
+              progress: `저장 중... (${batchNo}/${totalBatches} 배치)`,
+              errors: []
+            });
 
-          // 로컬 상태에도 반영
-          setExtraSpec(prev => [...(prev || []), ...newRows]);
+            const res = await fetch("/.netlify/functions/save-specimens", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ apiKey: "jeju2026!", rows: batch, upsert: isUpsertMode }),
+            });
+            let json;
+            try {
+              json = await res.json();
+            } catch (parseErr) {
+              throw new Error(`서버 응답 오류 (${batchNo}/${totalBatches} 배치, status ${res.status})`);
+            }
+            if (!json.ok) throw new Error((json.error || "저장 실패") + ` (${batchNo}/${totalBatches} 배치)`);
+            totalAdded += json.added || batch.length;
+
+            // Supabase/Netlify에 과부하를 주지 않도록 배치 사이에 짧게 대기
+            if (i + SAVE_BATCH < newRows.length) await new Promise(r => setTimeout(r, 150));
+          }
+
+          // 로컬 상태에도 반영: 이미 있던 관리번호는 새 값으로 교체하고, 없던 것만 새로 추가
+          setExtraSpec(prev => {
+            const list = prev || [];
+            const updatedMap = new Map(newRows.map(r => [r[0], r]));
+            const merged = list.map(r => updatedMap.has(r[0]) ? updatedMap.get(r[0]) : r);
+            const existingIdSet = new Set(list.map(r => r[0]));
+            const trulyNew = newRows.filter(r => !existingIdSet.has(r[0]));
+            return [...merged, ...trulyNew];
+          });
           setSyncState("done");
           setUploadState("done");
           setUploadResult({
-            added: json.added,
-            skipped: rows.length - newRows.length + (json.skipped || 0),
+            added: totalAdded,
+            skipped: rows.length - newRows.length,
             errors: errors.slice(0, 20)
           });
         } catch (syncErr) {
           setSyncState("error");
           setUploadState("error");
           setUploadResult({
-            errors: ["데이터베이스 저장 실패: " + syncErr.message]
+            added: totalAdded,
+            errors: [`데이터베이스 저장 실패(이미 저장된 ${totalAdded}건은 반영됨): ` + syncErr.message]
           });
         }
       } catch (err) {
@@ -9181,7 +9223,7 @@ function SpecimenSearchPage({
       fontSize: 13,
       fontWeight: 600
     }
-  }, uploadState === "parsing" ? "⏳ 파일 파싱 중..." : "☁️ 데이터베이스에 저장 중..."), uploadState === "done" && uploadResult && /*#__PURE__*/React.createElement("div", {
+  }, uploadState === "parsing" ? "⏳ 파일 파싱 중..." : (uploadResult?.progress || "☁️ 데이터베이스에 저장 중...")), uploadState === "done" && uploadResult && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#f0f9f4",
       borderRadius: 9,
@@ -9205,7 +9247,7 @@ function SpecimenSearchPage({
     style: {
       fontSize: 12.5
     }
-  }, "추가된 표본: ", /*#__PURE__*/React.createElement("b", {
+  }, isUpsertMode ? "수정된 표본: " : "추가된 표본: ", /*#__PURE__*/React.createElement("b", {
     style: {
       color: "#1a6b3e"
     }
