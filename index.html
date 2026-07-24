@@ -8060,19 +8060,15 @@ function computeStatsFromSpecimens(specimens, pharmaData) {
   pharmaData.forEach(entry => {
     (entry.origins || []).forEach(o => originsList.push(o));
   });
-  const pharmaMap = {};
-  originsList.forEach(o => {
-    const key = (o.sciName || "").trim();
-    if (!key) return;
-    if (!pharmaMap[key]) pharmaMap[key] = new Set();
-    if (o.type) pharmaMap[key].add(o.type);
-  });
-  function pharmaOf(sciName) {
-    const set = pharmaMap[(sciName || "").trim()];
-    if (!set || set.size === 0) return "미등재";
-    if (set.has("KP") && set.has("KHP")) return "KP, KHP";
-    if (set.has("KP")) return "KP";
-    if (set.has("KHP")) return "KHP";
+
+  // 공정서 등재 여부는 표본 자신의 "공정서" 컬럼(r[13]) 값을 기준으로 판단한다.
+  // KP, KHP에 동시 등재된 경우는 KP로만 집계해서 KP/KHP/미등재 세 그룹의 합이
+  // 정확히 전체(100%)가 되도록 한다.
+  function pharmaOf(raw) {
+    const v = (raw || "").trim();
+    if (!v) return "미등재";
+    if (v.includes("KP")) return "KP"; // "KP" 및 "KP, KHP" 모두 KP로 집계
+    if (v.includes("KHP")) return "KHP";
     return "미등재";
   }
 
@@ -8083,31 +8079,39 @@ function computeStatsFromSpecimens(specimens, pharmaData) {
   }
 
   function specimenLevelStats(rows) {
-    let kp = 0, khp = 0, combined = 0, none = 0;
+    let kp = 0, khp = 0, none = 0;
     rows.forEach(r => {
-      const p = pharmaOf(r[6]);
+      const p = pharmaOf(r[13]);
       if (p === "KP") kp++;
       else if (p === "KHP") khp++;
-      else if (p === "KP, KHP") combined++;
       else none++;
     });
-    const both = kp + khp + combined; // KP 또는 KHP(또는 둘 다)에 등재된 개체 수
+    const both = kp + khp; // 등재(KP 또는 KHP) 개체 수
     const total = rows.length;
     return { total, kp, khp, both, none, kpPct: pctOf(kp, total), khpPct: pctOf(khp, total), bothPct: pctOf(both, total), nonePct: pctOf(none, total) };
   }
 
+  // 종(학명) 단위 집계: 같은 종의 표본들 중 하나라도 KP 표시가 있으면 그 종은 KP로,
+  // KP가 없고 KHP 표시가 있으면 KHP로, 어느 표본에도 표시가 없으면 미등재로 분류한다.
   function speciesLevelStats(rows) {
-    const speciesSet = uniqueSpecies(rows);
-    let kp = 0, khp = 0, combined = 0, none = 0;
-    speciesSet.forEach(sci => {
-      const p = pharmaOf(sci);
+    const speciesPharma = new Map(); // sciName -> "KP" | "KHP" | "미등재"
+    rows.forEach(r => {
+      const sci = (r[6] || "").trim();
+      if (!sci) return;
+      const p = pharmaOf(r[13]);
+      const cur = speciesPharma.get(sci);
+      if (p === "KP" || cur === "KP") speciesPharma.set(sci, "KP");
+      else if (p === "KHP" || cur === "KHP") speciesPharma.set(sci, "KHP");
+      else if (!cur) speciesPharma.set(sci, "미등재");
+    });
+    let kp = 0, khp = 0, none = 0;
+    speciesPharma.forEach(p => {
       if (p === "KP") kp++;
       else if (p === "KHP") khp++;
-      else if (p === "KP, KHP") combined++;
       else none++;
     });
-    const total = speciesSet.size;
-    const both = kp + khp + combined;
+    const total = speciesPharma.size;
+    const both = kp + khp;
     return { total, kp, khp, both, none, kpPct: pctOf(kp, total), khpPct: pctOf(khp, total), bothPct: pctOf(both, total), nonePct: pctOf(none, total) };
   }
 
@@ -11780,21 +11784,13 @@ function SpecimenModalWrapper() {
 // 아래 함수로 학명 기준 집계를 다시 계산해 항상 최신 상태를 유지한다.
 // (단, 국명/생약명의 이명(異名)은 표본 데이터에 없으므로 alias/drugAlias는 빈 값으로 둔다.)
 function computeSpeciesFromSpecimens(specimens, pharmaData) {
-  const pharmaMap = {};
-  (pharmaData || []).forEach(entry => {
-    (entry.origins || []).forEach(o => {
-      const key = (o.sciName || "").trim();
-      if (!key) return;
-      if (!pharmaMap[key]) pharmaMap[key] = new Set();
-      if (o.type) pharmaMap[key].add(o.type);
-    });
-  });
-  const pharmaOf = sciName => {
-    const set = pharmaMap[(sciName || "").trim()];
-    if (!set || set.size === 0) return "미등재";
-    if (set.has("KP") && set.has("KHP")) return "KP, KHP";
-    if (set.has("KP")) return "KP";
-    if (set.has("KHP")) return "KHP";
+  // 공정서 등재 여부는 표본 자신의 "공정서" 컬럼(r[13]) 값을 기준으로 판단한다.
+  // KP, KHP 동시 등재는 KP로 집계한다.
+  const pharmaOf = raw => {
+    const v = (raw || "").trim();
+    if (!v) return "미등재";
+    if (v.includes("KP")) return "KP";
+    if (v.includes("KHP")) return "KHP";
     return "미등재";
   };
   function groupBy(rows) {
@@ -11811,7 +11807,7 @@ function computeSpeciesFromSpecimens(specimens, pharmaData) {
           family: r[11] || "",
           sciName,
           count: 0,
-          pharma: pharmaOf(sciName)
+          pharma: "미등재"
         });
       }
       const entry = map.get(sciName);
@@ -11819,6 +11815,10 @@ function computeSpeciesFromSpecimens(specimens, pharmaData) {
       if (!entry.korName && r[5]) entry.korName = r[5];
       if (!entry.drugName && r[4]) entry.drugName = r[4];
       if (!entry.family && r[11]) entry.family = r[11];
+      // 같은 종의 표본 중 하나라도 KP면 KP, 그 다음 KHP가 있으면 KHP로 승격
+      const p = pharmaOf(r[13]);
+      if (p === "KP") entry.pharma = "KP";
+      else if (p === "KHP" && entry.pharma !== "KP") entry.pharma = "KHP";
     });
     return Array.from(map.values()).sort((a, b) => a.korName.localeCompare(b.korName, "ko"));
   }
