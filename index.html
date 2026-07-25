@@ -8052,13 +8052,45 @@ function pctOf(n, total) {
   return total > 0 ? Math.round((n / total) * 1000) / 10 : 0;
 }
 
-function computeStatsFromSpecimens(specimens, pharmaData) {
+function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
   pharmaData = pharmaData || [];
   specimens = specimens || [];
+  synonyms = synonyms || [];
+
+  // 아래 3종은 "가루생약"으로 분류되어 식물류 생약(KP·KHP 등재 종수) 집계에서는 제외한다.
+  // 다만 기원 자체는 식물(차나무, Orthosiphon stamineus, 오두 등)이므로, 식물류
+  // 기원종 집계(originsList 기반, 558종)에는 그대로 포함시킨다 — 두 통계는 별개다.
+  const POWDER_CLASSIFIED_DRUG_NAMES = ["정제부자", "오르소시폰가루", "오르소쉬폰가루", "다엽가루"];
+  const plantPharmaData = pharmaData.filter(e => !POWDER_CLASSIFIED_DRUG_NAMES.includes(e.name));
 
   let originsList = [];
   pharmaData.forEach(entry => {
     (entry.origins || []).forEach(o => originsList.push(o));
+  });
+
+  // "근연", "동속", "변종", "잡종"이라는 말이 들어간 기원 항목은 제외하고,
+  // 기원(한글)명 기준으로 중복을 제거해 기원종을 집계한다 (동속 근연 "제외" 기준).
+  const EXCLUDE_KEYWORDS = ["근연", "동속", "변종", "잡종"];
+  function isExcludedOrigin(name) {
+    return EXCLUDE_KEYWORDS.some(k => (name || "").includes(k));
+  }
+  const originGroups = new Map(); // 기원명(국명) → { sciNames: Set, types: Set }
+  originsList.forEach(o => {
+    if (isExcludedOrigin(o.origin)) return;
+    const key = (o.origin || "").trim();
+    if (!originGroups.has(key)) originGroups.set(key, { sciNames: new Set(), types: new Set() });
+    const group = originGroups.get(key);
+    const sci = (o.sciName || "").trim();
+    if (sci) group.sciNames.add(sci);
+    if (o.type) group.types.add(o.type);
+  });
+
+  // 이명 매핑: 표본 국명 → 공정서 국명 (학명은 이명이 너무 많아 국명 기준으로 관리)
+  const synonymMap = new Map();
+  synonyms.forEach(s => {
+    const from = (s[0] || "").trim();
+    const to = (s[1] || "").trim();
+    if (from && to) synonymMap.set(from, to);
   });
 
   // 공정서 등재 여부는 표본 자신의 "공정서" 컬럼(r[13]) 값을 기준으로 판단한다.
@@ -8072,16 +8104,34 @@ function computeStatsFromSpecimens(specimens, pharmaData) {
     return "미등재";
   }
 
+  // 포함(동속 근연 포함): 표본 데이터에 입력된 공정서 컬럼값을 그대로 사용
+  function classifyIncl(r) {
+    return pharmaOf(r[13]);
+  }
+  // 제외(동속 근연 제외): 포함 데이터에서 등재로 표시된 표본만, 국명(이명 매핑 적용)을
+  // 공정서 기원종(근연/동속/변종/잡종 제외한 정밀 목록)과 대조해 다시 확인한다.
+  function classifyExcl(r) {
+    const incl = pharmaOf(r[13]);
+    if (incl === "미등재") return "미등재";
+    const korName = (r[5] || "").trim();
+    const resolved = synonymMap.get(korName) || korName;
+    const group = originGroups.get(resolved);
+    if (!group || group.types.size === 0) return "미등재";
+    if (group.types.has("KP")) return "KP";
+    if (group.types.has("KHP")) return "KHP";
+    return "미등재";
+  }
+
   function uniqueSpecies(rows) {
     const set = new Set();
     rows.forEach(r => { const s = (r[6] || "").trim(); if (s) set.add(s); });
     return set;
   }
 
-  function specimenLevelStats(rows) {
+  function specimenLevelStats(rows, classify) {
     let kp = 0, khp = 0, none = 0;
     rows.forEach(r => {
-      const p = pharmaOf(r[13]);
+      const p = classify(r);
       if (p === "KP") kp++;
       else if (p === "KHP") khp++;
       else none++;
@@ -8093,12 +8143,12 @@ function computeStatsFromSpecimens(specimens, pharmaData) {
 
   // 종(학명) 단위 집계: 같은 종의 표본들 중 하나라도 KP 표시가 있으면 그 종은 KP로,
   // KP가 없고 KHP 표시가 있으면 KHP로, 어느 표본에도 표시가 없으면 미등재로 분류한다.
-  function speciesLevelStats(rows) {
+  function speciesLevelStats(rows, classify) {
     const speciesPharma = new Map(); // sciName -> "KP" | "KHP" | "미등재"
     rows.forEach(r => {
       const sci = (r[6] || "").trim();
       if (!sci) return;
-      const p = pharmaOf(r[13]);
+      const p = classify(r);
       const cur = speciesPharma.get(sci);
       if (p === "KP" || cur === "KP") speciesPharma.set(sci, "KP");
       else if (p === "KHP" || cur === "KHP") speciesPharma.set(sci, "KHP");
@@ -8139,26 +8189,36 @@ function computeStatsFromSpecimens(specimens, pharmaData) {
   const storage3Rows = specimens.filter(r => (r[2] || "").includes("3수장고"));
 
   const allSpeciesSet = uniqueSpecies(specimens);
-  const specimenPharmAll = specimenLevelStats(specimens);
-  const speciesPharmAll = speciesLevelStats(specimens);
-  const speciesPharmS1 = speciesLevelStats(storage1Rows);
-  const speciesPharmS3 = speciesLevelStats(storage3Rows);
-  const specimenPharmS1 = specimenLevelStats(storage1Rows);
-  const specimenPharmS3 = specimenLevelStats(storage3Rows);
+  const specimenPharmAll = specimenLevelStats(specimens, classifyIncl);
+  const specimenPharmAllExcl = specimenLevelStats(specimens, classifyExcl);
+  const speciesPharmAll = speciesLevelStats(specimens, classifyIncl);
+  const speciesPharmAllExcl = speciesLevelStats(specimens, classifyExcl);
+  const speciesPharmS1 = speciesLevelStats(storage1Rows, classifyIncl);
+  const speciesPharmS1Excl = speciesLevelStats(storage1Rows, classifyExcl);
+  const speciesPharmS3 = speciesLevelStats(storage3Rows, classifyIncl);
+  const speciesPharmS3Excl = speciesLevelStats(storage3Rows, classifyExcl);
+  const specimenPharmS1 = specimenLevelStats(storage1Rows, classifyIncl);
+  const specimenPharmS1Excl = specimenLevelStats(storage1Rows, classifyExcl);
+  const specimenPharmS3 = specimenLevelStats(storage3Rows, classifyIncl);
+  const specimenPharmS3Excl = specimenLevelStats(storage3Rows, classifyExcl);
 
-  // 공정서 원료(학명) 커버리지: 전체 원료 항목(origins) 중 표본으로 실제 확보된 항목 비율
-  let coveredOrigins = 0;
-  originsList.forEach(o => {
-    const sci = (o.sciName || "").trim();
-    if (sci && allSpeciesSet.has(sci)) coveredOrigins++;
+  const totalOrigins = originGroups.size; // 558종이 나와야 함
+  let coveredOrigins = 0, kpOrigins = 0, khpOrigins = 0;
+  originGroups.forEach(group => {
+    let covered = false;
+    group.sciNames.forEach(sci => { if (allSpeciesSet.has(sci)) covered = true; });
+    if (covered) coveredOrigins++;
+    if (group.types.has("KP")) kpOrigins++; // KP·KHP 동시 등재는 KP로 집계
+    else if (group.types.has("KHP")) khpOrigins++;
   });
-  const totalOrigins = originsList.length;
 
   return {
     summary: {
       pharmacopoeia: {
-        total: pharmaData.length,
+        total: plantPharmaData.length,
         origins: totalOrigins,
+        kpOrigins,
+        khpOrigins,
         originNote: ""
       },
       specimens: {
@@ -8166,14 +8226,18 @@ function computeStatsFromSpecimens(specimens, pharmaData) {
         species: allSpeciesSet.size
       },
       specimenPharm: specimenPharmAll,
+      specimenPharmExcl: specimenPharmAllExcl,
       speciesPharm: speciesPharmAll,
+      speciesPharmExcl: speciesPharmAllExcl,
       storage1: {
         species: speciesPharmS1.total,
         kp: speciesPharmS1.kp,
         khp: speciesPharmS1.khp,
         both: speciesPharmS1.both,
         none: speciesPharmS1.none,
-        bothPct: speciesPharmS1.bothPct
+        bothPct: speciesPharmS1.bothPct,
+        speciesExcl: speciesPharmS1Excl.total,
+        bothPctExcl: speciesPharmS1Excl.bothPct
       },
       storage3: {
         species: speciesPharmS3.total,
@@ -8181,7 +8245,9 @@ function computeStatsFromSpecimens(specimens, pharmaData) {
         khp: speciesPharmS3.khp,
         both: speciesPharmS3.both,
         none: speciesPharmS3.none,
-        bothPct: speciesPharmS3.bothPct
+        bothPct: speciesPharmS3.bothPct,
+        speciesExcl: speciesPharmS3Excl.total,
+        bothPctExcl: speciesPharmS3Excl.bothPct
       },
       originCoverage: {
         total: totalOrigins,
@@ -8197,6 +8263,10 @@ function computeStatsFromSpecimens(specimens, pharmaData) {
       khp: specimenPharmS1.khp,
       both: specimenPharmS1.both,
       none: specimenPharmS1.none,
+      kpExcl: specimenPharmS1Excl.kp,
+      khpExcl: specimenPharmS1Excl.khp,
+      bothExcl: specimenPharmS1Excl.both,
+      noneExcl: specimenPharmS1Excl.none,
       topFamilies: topFamiliesOf(storage1Rows, 15),
       importance: importanceOf(storage1Rows)
     },
@@ -8207,15 +8277,20 @@ function computeStatsFromSpecimens(specimens, pharmaData) {
       khp: specimenPharmS3.khp,
       both: specimenPharmS3.both,
       none: specimenPharmS3.none,
+      kpExcl: specimenPharmS3Excl.kp,
+      khpExcl: specimenPharmS3Excl.khp,
+      bothExcl: specimenPharmS3Excl.both,
+      noneExcl: specimenPharmS3Excl.none,
       topFamilies: topFamiliesOf(storage3Rows, 15),
       importance: importanceOf(storage3Rows)
     }
   };
 }
-window.__STATS__ = computeStatsFromSpecimens([], window.__PHARMA__); // 표본 로딩 전 기본값(0으로 채워진 형태) 확보
+window.__STATS__ = computeStatsFromSpecimens([], window.__PHARMA__, []); // 표본 로딩 전 기본값(0으로 채워진 형태) 확보
 ;
 const fmt = n => n?.toLocaleString("ko-KR");
 const pct = (n, t) => (n / t * 100).toFixed(1) + "%";
+
 
 // ─── 모달 컴포넌트 ────────────────────────────────────────────────────────────
 function Modal({
@@ -9826,6 +9901,9 @@ function HomePage({
 }) {
   const s = window.__STATS__.summary;
   const st = window.__STATS__;
+  const [pharmaMode, setPharmaMode] = useState("incl"); // "incl" 동속 근연 포함 | "excl" 동속 근연 제외
+  const specimenPharmView = pharmaMode === "incl" ? s.specimenPharm : s.specimenPharmExcl;
+  const speciesPharmView = pharmaMode === "incl" ? s.speciesPharm : s.speciesPharmExcl;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       background: "linear-gradient(135deg,#0f3d22,#1a6b3e)",
@@ -9901,6 +9979,31 @@ function HomePage({
     onClick: () => onNav("specimen-search", { storage: "3수장고" })
   })), /*#__PURE__*/React.createElement("div", {
     style: {
+      display: "flex",
+      gap: 7,
+      marginBottom: 10
+    }
+  }, [{
+    id: "incl",
+    label: "동속 근연 포함"
+  }, {
+    id: "excl",
+    label: "동속 근연 제외"
+  }].map(m => /*#__PURE__*/React.createElement("button", {
+    key: m.id,
+    onClick: () => setPharmaMode(m.id),
+    style: {
+      padding: "6px 14px",
+      borderRadius: 16,
+      border: "none",
+      cursor: "pointer",
+      fontWeight: 600,
+      fontSize: 12,
+      background: pharmaMode === m.id ? "#1a6b3e" : "#f0f4f2",
+      color: pharmaMode === m.id ? "#fff" : "#4a6050"
+    }
+  }, m.label))), /*#__PURE__*/React.createElement("div", {
+    style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
       gap: 18,
@@ -9916,10 +10019,10 @@ function HomePage({
     }
   }, /*#__PURE__*/React.createElement(DonutChart, {
     segments: [{
-      pct: s.specimenPharm.bothPct,
+      pct: specimenPharmView.bothPct,
       color: "#1a6b3e"
     }, {
-      pct: 100 - s.specimenPharm.bothPct,
+      pct: 100 - specimenPharmView.bothPct,
       color: "#e8eded"
     }]
   }), /*#__PURE__*/React.createElement("div", {
@@ -9929,19 +10032,19 @@ function HomePage({
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#1a6b3e",
     label: "공정서 등재",
-    value: `${fmt(s.specimenPharm.both)}점 (${s.specimenPharm.bothPct}%)`
+    value: `${fmt(specimenPharmView.both)}점 (${specimenPharmView.bothPct}%)`
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#4bbf84",
     label: "KP 등재",
-    value: `${fmt(s.specimenPharm.kp)}점`
+    value: `${fmt(specimenPharmView.kp)}점`
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#78d4a4",
     label: "KHP 등재",
-    value: `${fmt(s.specimenPharm.khp)}점`
+    value: `${fmt(specimenPharmView.khp)}점`
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미등재",
-    value: `${fmt(s.specimenPharm.none)}점`,
+    value: `${fmt(specimenPharmView.none)}점`,
     border: true
   })))), /*#__PURE__*/React.createElement(Section, {
     title: `식물종 공정서 등재율 (${fmt(s.specimens.species)}종)`
@@ -9953,10 +10056,10 @@ function HomePage({
     }
   }, /*#__PURE__*/React.createElement(DonutChart, {
     segments: [{
-      pct: s.speciesPharm.bothPct,
+      pct: speciesPharmView.bothPct,
       color: "#2563a6"
     }, {
-      pct: 100 - s.speciesPharm.bothPct,
+      pct: 100 - speciesPharmView.bothPct,
       color: "#e8eded"
     }]
   }), /*#__PURE__*/React.createElement("div", {
@@ -9966,19 +10069,19 @@ function HomePage({
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#2563a6",
     label: "공정서 등재",
-    value: `${fmt(s.speciesPharm.both)}종 (${s.speciesPharm.bothPct}%)`
+    value: `${fmt(speciesPharmView.both)}종 (${speciesPharmView.bothPct}%)`
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#3d87cf",
     label: "KP 등재",
-    value: `${fmt(s.speciesPharm.kp)}종`
+    value: `${fmt(speciesPharmView.kp)}종`
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#6aaae0",
     label: "KHP 등재",
-    value: `${fmt(s.speciesPharm.khp)}종`
+    value: `${fmt(speciesPharmView.khp)}종`
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미등재",
-    value: `${fmt(s.speciesPharm.none)}종`,
+    value: `${fmt(speciesPharmView.none)}종`,
     border: true
   }))))), /*#__PURE__*/React.createElement(Section, {
     title: `공정서 기원종 ${fmt(s.originCoverage.total)}종 중 제주센터 보유율`,
@@ -10240,22 +10343,22 @@ function PharmaStatsPage() {
     }
   }, /*#__PURE__*/React.createElement(StatCard, {
     label: "공정서 식물류 생약",
-    value: "443종",
+    value: `${fmt(window.__STATS__.summary.pharmacopoeia.total)}종`,
     sub: "KP + KHP 통합",
     accent: "#2563a6"
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "식물 유래 기원종",
-    value: "558종",
+    value: `${fmt(window.__STATS__.summary.pharmacopoeia.origins)}종`,
     sub: "버섯 8종 포함",
     accent: "#2563a6"
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "KP 등재 기원종",
-    value: "250종",
+    value: `${fmt(window.__STATS__.summary.pharmacopoeia.kpOrigins)}종`,
     sub: "대한민국약전",
     accent: "#1a4a7a"
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "KHP 등재 기원종",
-    value: "422종",
+    value: `${fmt(window.__STATS__.summary.pharmacopoeia.khpOrigins)}종`,
     sub: "생약규격집",
     accent: "#3d87cf"
   })), /*#__PURE__*/React.createElement("div", {
@@ -11834,6 +11937,179 @@ function computeSpeciesFromSpecimens(specimens, pharmaData) {
 }
 
 // ─── 메인 앱 ─────────────────────────────────────────────────────────────────
+// ─── 이명 관리 페이지 ─────────────────────────────────────────────────────────
+function SynonymsPage({
+  synonyms,
+  reloadSynonyms
+}) {
+  const [uploadState, setUploadState] = useState("idle"); // idle | parsing | syncing | done | error
+  const [uploadResult, setUploadResult] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const downloadTemplate = () => {
+    const rows = [["표본국명", "공정서국명"], ["예) 참당귀", "당귀"]];
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "이명");
+    XLSX.writeFile(wb, "이명_업로드_양식.xlsx");
+  };
+
+  const downloadCurrent = () => {
+    const rows = [["표본국명", "공정서국명"], ...(synonyms || [])];
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "이명");
+    XLSX.writeFile(wb, "이명_목록_" + new Date().toISOString().slice(0, 10) + ".xlsx");
+  };
+
+  const handleFileUpload = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadState("parsing");
+    setUploadResult(null);
+    const reader = new FileReader();
+    reader.onload = async evt => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type: "array" });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+
+        const newRows = [];
+        const errors = [];
+        rows.forEach((row, i) => {
+          const from = String(row["표본국명"] || "").trim();
+          const to = String(row["공정서국명"] || "").trim();
+          if (!from && !to) return;
+          if (!from || !to) {
+            errors.push(`행 ${i + 2}: 표본국명/공정서국명 중 하나가 비어있음`);
+            return;
+          }
+          newRows.push([from, to]);
+        });
+
+        if (newRows.length === 0) {
+          setUploadState("done");
+          setUploadResult({ added: 0, errors });
+          return;
+        }
+
+        setUploadState("syncing");
+        const res = await fetch("/.netlify/functions/save-synonyms", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey: "jeju2026!", rows: newRows, upsert: true }),
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || "저장 실패");
+
+        await reloadSynonyms();
+        setUploadState("done");
+        setUploadResult({ added: json.added, errors: errors.slice(0, 20) });
+      } catch (err) {
+        setUploadState("error");
+        setUploadResult({ errors: ["저장 실패: " + err.message] });
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = "";
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  const header = /*#__PURE__*/React.createElement(SectionHeader, {
+    title: "이명(異名) 관리",
+    sub: "표본 데이터의 국명(식물명)과 공정서 데이터의 국명 표기가 다른 경우, 여기서 연결해두면 \"동속 근연 제외\" 통계 계산에 반영됩니다.",
+    color: "#1a6b3e"
+  });
+
+  const uploadButtons = /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: 10, flexWrap: "wrap" }
+  },
+    /*#__PURE__*/React.createElement("button", {
+      onClick: downloadTemplate,
+      style: { padding: "9px 16px", borderRadius: 8, border: "1px solid #b0dcc0", background: "#f0f9f4", color: "#1a6b3e", fontWeight: 600, fontSize: 13, cursor: "pointer" }
+    }, "⬇ 업로드 양식 다운로드"),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: downloadCurrent,
+      style: { padding: "9px 16px", borderRadius: 8, border: "1px solid #cfd8dc", background: "#fff", color: "#546e7a", fontWeight: 600, fontSize: 13, cursor: "pointer" }
+    }, `⬇ 현재 이명 목록 다운로드 (${fmt((synonyms || []).length)}건)`),
+    /*#__PURE__*/React.createElement("button", {
+      onClick: () => fileInputRef.current && fileInputRef.current.click(),
+      style: { padding: "9px 16px", borderRadius: 8, border: "none", background: "#1a6b3e", color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }
+    }, "＋ 이명 업로드"),
+    /*#__PURE__*/React.createElement("input", {
+      ref: fileInputRef,
+      type: "file",
+      accept: ".xlsx,.xls",
+      style: { display: "none" },
+      onChange: handleFileUpload
+    })
+  );
+
+  const statusMessage = (uploadState === "parsing" || uploadState === "syncing") ? /*#__PURE__*/React.createElement("div", {
+    style: { textAlign: "center", padding: "12px 0", color: "#1a6b3e", fontSize: 13, fontWeight: 600 }
+  }, uploadState === "parsing" ? "⏳ 파일 파싱 중..." : "☁️ 데이터베이스에 저장 중...") : null;
+
+  const doneBox = (uploadState === "done" && uploadResult) ? /*#__PURE__*/React.createElement("div", {
+    style: { background: "#f0f9f4", borderRadius: 9, padding: "14px 16px", border: "1px solid #b0dcc0", marginTop: 12 }
+  },
+    /*#__PURE__*/React.createElement("div", {
+      style: { fontWeight: 700, color: "#1a6b3e", fontSize: 13, marginBottom: 6 }
+    }, "✅ 저장 완료"),
+    /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 13, color: "#4a6050" }
+    }, "등록/수정된 이명: ", /*#__PURE__*/React.createElement("b", null, fmt(uploadResult.added || 0)), "건"),
+    (uploadResult.errors && uploadResult.errors.length > 0) ? /*#__PURE__*/React.createElement("div", {
+      style: { fontSize: 12, color: "#c0392b", marginTop: 8, lineHeight: 1.6 }
+    }, uploadResult.errors.map((e, i) => /*#__PURE__*/React.createElement("div", { key: i }, e))) : null
+  ) : null;
+
+  const errorBox = (uploadState === "error" && uploadResult) ? /*#__PURE__*/React.createElement("div", {
+    style: { background: "#fdf0ee", borderRadius: 9, padding: "14px 16px", border: "1px solid #f0b8ae", marginTop: 12, color: "#c0392b", fontSize: 13 }
+  }, uploadResult.errors.join(" ")) : null;
+
+  const uploadSection = /*#__PURE__*/React.createElement(Section, {
+    title: "엑셀로 일괄 등록/수정"
+  },
+    /*#__PURE__*/React.createElement("p", {
+      style: { fontSize: 13, color: "#546e7a", lineHeight: 1.7, marginBottom: 14 }
+    }, "표본국명 1개당 공정서국명 1개를 연결합니다. 같은 표본국명을 다시 업로드하면 기존 값을 덮어씁니다."),
+    uploadButtons,
+    statusMessage,
+    doneBox,
+    errorBox
+  );
+
+  const listRows = (synonyms || []).map((s, i) => /*#__PURE__*/React.createElement("tr", {
+    key: i
+  },
+    /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } }, s[0]),
+    /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } }, s[1])
+  ));
+
+  const listTable = (!synonyms || synonyms.length === 0) ? /*#__PURE__*/React.createElement("p", {
+    style: { fontSize: 13, color: "#95a5a6" }
+  }, "아직 등록된 이명이 없습니다.") : /*#__PURE__*/React.createElement("div", {
+    style: { maxHeight: 420, overflowY: "auto", border: "1px solid #e0e6e3", borderRadius: 8 }
+  }, /*#__PURE__*/React.createElement("table", {
+    style: { width: "100%", borderCollapse: "collapse", fontSize: 13 }
+  },
+    /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", {
+      style: { background: "#f6f9f7", position: "sticky", top: 0 }
+    },
+      /*#__PURE__*/React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid #e0e6e3" } }, "표본국명"),
+      /*#__PURE__*/React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid #e0e6e3" } }, "공정서국명")
+    )),
+    /*#__PURE__*/React.createElement("tbody", null, listRows)
+  ));
+
+  const listSection = /*#__PURE__*/React.createElement(Section, {
+    title: `등록된 이명 (${fmt((synonyms || []).length)}건)`,
+    style: { marginTop: 18 }
+  }, listTable);
+
+  return /*#__PURE__*/React.createElement("div", null, header, uploadSection, listSection);
+}
+
 function App() {
   const [page, setPage] = useState("home");
   const [navParams, setNavParams] = useState(null);
@@ -11850,6 +12126,16 @@ function App() {
   const [allSpecimens, setAllSpecimens] = useState(null); // DB에서 불러온 전체 표본
   const [specimensLoading, setSpecimensLoading] = useState(false); // DB 로딩 중
   const [specimensError, setSpecimensError] = useState(null); // DB 오류
+  const [synonyms, setSynonyms] = useState([]); // 이명 매핑: [[표본국명, 공정서국명], ...]
+  const loadSynonyms = useCallback(async () => {
+    try {
+      const res = await fetch("/.netlify/functions/get-synonyms");
+      const json = await res.json();
+      if (json.ok) setSynonyms(json.data || []);
+    } catch (e) {
+      // 이명 데이터는 없어도 나머지 기능에 지장이 없으므로 조용히 무시
+    }
+  }, []);
   const loadAllSpecimens = useCallback(async () => {
     setSpecimensLoading(true);
     setSpecimensError(null);
@@ -11879,7 +12165,8 @@ function App() {
   // 사이트가 처음 열릴 때(=App 최초 렌더링 시) 자동으로 전체 표본을 불러옵니다.
   useEffect(() => {
     loadAllSpecimens();
-  }, [loadAllSpecimens]);
+    loadSynonyms();
+  }, [loadAllSpecimens, loadSynonyms]);
 
   // ── window.__SPEC__ 호환 동기화 ──────────────────────────────────
   // 생약 지도(MapPage)와 식물종 정보(SpeciesModal), 표본 상세(SpecimenModal의
@@ -11894,9 +12181,10 @@ function App() {
     if (allSpecimens) {
       window.__SPEC__ = allSpecimens;
       window.__SPECIES__ = computeSpeciesFromSpecimens(allSpecimens, window.__PHARMA__);
-      window.__STATS__ = computeStatsFromSpecimens(allSpecimens, window.__PHARMA__);
+      window.__SYNONYMS__ = synonyms;
+      window.__STATS__ = computeStatsFromSpecimens(allSpecimens, window.__PHARMA__, synonyms);
     }
-  }, [allSpecimens]);
+  }, [allSpecimens, synonyms]);
 
   // 대시보드 카드 등에서 페이지 이동과 함께 필터 조건을 함께 전달하기 위한 헬퍼
   const nav = (id, params) => {
@@ -11924,6 +12212,9 @@ function App() {
   }, {
     id: "specimen",
     label: "표본 통계"
+  }, {
+    id: "synonyms",
+    label: "이명 관리"
   }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -12024,7 +12315,10 @@ function App() {
     specimens: allSpecimens,
     specimensLoading: specimensLoading,
     specimensError: specimensError
-  }), page === "pharma" && /*#__PURE__*/React.createElement(PharmaStatsPage, null), page === "specimen" && /*#__PURE__*/React.createElement(SpecimenStatsPage, null)), /*#__PURE__*/React.createElement("footer", {
+  }), page === "pharma" && /*#__PURE__*/React.createElement(PharmaStatsPage, null), page === "specimen" && /*#__PURE__*/React.createElement(SpecimenStatsPage, null), page === "synonyms" && /*#__PURE__*/React.createElement(SynonymsPage, {
+    synonyms: synonyms,
+    reloadSynonyms: loadSynonyms
+  })), /*#__PURE__*/React.createElement("footer", {
     style: {
       background: "#0f3d22",
       color: "rgba(255,255,255,0.5)",
