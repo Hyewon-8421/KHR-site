@@ -15,9 +15,13 @@ function httpsPatch(url, headers, body) {
       headers: { ...headers, "Content-Length": buf.length },
     };
     const req = https.request(options, (res) => {
-      let data = "";
-      res.on("data", chunk => data += chunk);
-      res.on("end", () => resolve({ status: res.statusCode, body: data }));
+      // 응답을 문자열로 바로 이어붙이면(chunk가 Buffer→string으로 암묵 변환되면서)
+      // 한글처럼 UTF-8에서 여러 바이트로 구성되는 문자가 네트워크 청크 경계에서
+      // 끊겨 깨질 수 있습니다. 반드시 Buffer 상태로 모두 모은 뒤,
+      // 끝에서 한 번만 UTF-8 문자열로 변환해야 합니다.
+      const chunks = [];
+      res.on("data", chunk => chunks.push(chunk));
+      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
     });
     req.on("error", reject);
     req.write(buf);
