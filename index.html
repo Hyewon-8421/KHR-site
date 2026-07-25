@@ -8199,8 +8199,24 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
   const storage3Rows = specimens.filter(r => (r[2] || "").includes("3수장고"));
 
   const allKorNameSet = uniqueKorNames(specimens); // 기원종 수(국명 기준)
-  const allSciNameSet = uniqueSciNames(specimens); // 공정서 원료 커버리지 대조용(학명 기준)
   const specimenPharmAll = specimenLevelStats(specimens, classifyIncl);
+
+  // ※ 이전에는 여기서 학명(sciName) 문자열을 완전일치로 대조해 "제주센터 보유 기원종"을
+  // 계산했다. 그런데 공정서 학명은 명명자 표기(Linné/L., Retzins/Retz. 등) 차이가 많아
+  // 완전일치가 거의 안 되고, 그 결과 보유율이 비정상적으로 낮게 나왔다.
+  // → classifyExcl과 완전히 같은 기준을 "거꾸로" 적용한다: 표본의 "공정서" 칸에
+  //   KP/KHP/"KP, KHP"가 이미 표시되어 있는 표본만 대상으로, 그 국명(이명 매핑 적용)이
+  //   이 기원종(국명)과 같은지 본다. 공정서 칸이 비어있는(미등재) 표본은 국명이 같은
+  //   동명이인 식물(다른 종인데 국명만 같은 경우)일 수 있으므로 아예 비교 대상에서
+  //   제외한다. 이렇게 하면 "동속 근연 제외 제주센터 식물종 중 공정서 등재 식물종 개수"
+  //   (speciesPharmAllExcl.both)와 정확히 같은 기준으로 셈해지므로 두 통계가 일치한다.
+  const resolvedSpecimenKorNames = new Set();
+  specimens.forEach(r => {
+    if (pharmaOf(r[13]) === "미등재") return; // 공정서 칸에 KP/KHP 표시가 없으면 제외
+    const kor = (r[5] || "").trim();
+    if (!kor) return;
+    resolvedSpecimenKorNames.add(synonymMap.get(kor) || kor);
+  });
   const specimenPharmAllExcl = specimenLevelStats(specimens, classifyExcl);
   const speciesPharmAll = speciesLevelStats(specimens, classifyIncl);
   const speciesPharmAllExcl = speciesLevelStats(specimens, classifyExcl);
@@ -8215,10 +8231,9 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
 
   const totalOrigins = originGroups.size; // 558종이 나와야 함
   let coveredOrigins = 0, kpOrigins = 0, khpOrigins = 0;
-  originGroups.forEach(group => {
-    let covered = false;
-    group.sciNames.forEach(sci => { if (allSciNameSet.has(sci)) covered = true; });
-    if (covered) coveredOrigins++;
+  originGroups.forEach((group, originName) => {
+    // 표본 국명(이명 매핑 적용)이 이 기원종 국명과 일치하면 "보유"로 센다.
+    if (resolvedSpecimenKorNames.has(originName)) coveredOrigins++;
     if (group.types.has("KP")) kpOrigins++; // KP·KHP 동시 등재는 KP로 집계
     else if (group.types.has("KHP")) khpOrigins++;
   });
@@ -8681,7 +8696,7 @@ function Badge({
   }, text);
 }
 
-// ─── 공정서 검색 페이지 ────────────────────────────────────────────────────────
+// ─── 공정서 생약 페이지 ────────────────────────────────────────────────────────
 function PharmaSearchPage() {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("전체");
@@ -8794,27 +8809,21 @@ function PharmaSearchPage() {
       color: "#1a2e1a",
       fontSize: 14
     }
-  }, drug.name), /*#__PURE__*/React.createElement("div", null, drug.origins.slice(0, 2).map((o, j) => /*#__PURE__*/React.createElement("div", {
+  }, drug.name), /*#__PURE__*/React.createElement("div", null, drug.origins.map((o, j) => /*#__PURE__*/React.createElement("div", {
     key: j,
     style: {
       fontSize: 12,
-      color: j === 0 ? "#2c3e50" : "#95a5a6",
-      fontStyle: j === 0 ? "normal" : "italic",
-      marginBottom: j === 0 ? 2 : 0
+      color: "#2c3e50",
+      marginBottom: j < drug.origins.length - 1 ? 3 : 0
     }
-  }, j === 0 ? o.origin : `+${drug.origins.length - 1}종`, j === 0 && /*#__PURE__*/React.createElement("span", {
+  }, o.origin, /*#__PURE__*/React.createElement("span", {
     style: {
       fontStyle: "italic",
       color: "#95a5a6",
       marginLeft: 4,
       fontSize: 11
     }
-  }, o.sciName?.substring(0, 30), o.sciName?.length > 30 ? "…" : ""), j !== 0 && drug.origins.length > 2 && "")), drug.origins.length > 1 && /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      color: "#bdc3c7"
-    }
-  }, "외 ", drug.origins.length - 1, "개 기원종")), /*#__PURE__*/React.createElement("span", {
+  }, o.sciName?.substring(0, 30), o.sciName?.length > 30 ? "…" : "")))), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
       color: "#546e7a"
@@ -8902,14 +8911,11 @@ function SpecimenSearchPage({
     URL.revokeObjectURL(url);
   };
 
-  // ── 엑셀 다운로드 (현재 검색/필터 조건으로 조회된 데이터만) ──────────────────────────
-  // filtered는 이 컴포넌트 아래쪽에서 storageFilter/familyFilter/pharmaFilter/query를
-  // 모두 반영해 계산되는 배열입니다. 함수 선언 위치는 위에 있지만 실제 호출(클릭)은
-  // 렌더링이 끝난 뒤 일어나므로, 클릭 시점의 filtered 값을 정상적으로 참조합니다.
+  // ── 엑셀 다운로드 (전체 표본, Supabase에서 로드된 전체 데이터) ──────────────────────────
   const exportToExcel = () => {
-    const data = filtered;
+    const data = extraSpec || [];
     if (data.length === 0) {
-      alert("다운로드할 표본이 없습니다. 검색/필터 조건을 확인해주세요.");
+      alert("다운로드할 표본이 없습니다. 데이터베이스 연결 상태를 확인해주세요.");
       return;
     }
     const COLS = ["관리번호","표본번호","수장고","수장위치","생약명","국명","학명","수집날짜","수집장소","중요도","속명","과명","GPS","공정서","과제명"];
@@ -8917,16 +8923,7 @@ function SpecimenSearchPage({
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "제주센터 표본");
-
-    // 파일명에 현재 적용된 필터 조건을 반영 (예: 1수장고, 특정 과, 공정서 조건, 검색어)
-    const filterParts = [];
-    if (storageFilter !== "전체") filterParts.push(storageFilter);
-    if (familyFilter !== "전체") filterParts.push(familyFilter);
-    if (pharmaFilter !== "전체") filterParts.push(pharmaFilter);
-    if (query) filterParts.push(query);
-    const suffix = filterParts.length > 0 ? filterParts.join("_") : "전체표본";
-
-    XLSX.writeFile(wb, `제주센터_${suffix}_` + new Date().toISOString().slice(0,10) + ".xlsx");
+    XLSX.writeFile(wb, "제주센터_전체표본_" + new Date().toISOString().slice(0,10) + ".xlsx");
   };
 
   // ── 엑셀 업로드 → 파싱 → DB 저장 ──────────────────────────
@@ -9166,7 +9163,7 @@ function SpecimenSearchPage({
       fontSize: 12.5,
       fontWeight: 600
     }
-  }, `⬇ 조회 결과 다운로드 (${fmt(filtered.length)}건)`),
+  }, "⬇ 전체 표본 다운로드"),
   /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setShowUpload(!showUpload);
@@ -11963,60 +11960,11 @@ function computeSpeciesFromSpecimens(specimens, pharmaData) {
 // ─── 이명 관리 페이지 ─────────────────────────────────────────────────────────
 function SynonymsPage({
   synonyms,
-  synonymsError,
   reloadSynonyms
 }) {
   const [uploadState, setUploadState] = useState("idle"); // idle | parsing | syncing | done | error
   const [uploadResult, setUploadResult] = useState(null);
   const fileInputRef = useRef(null);
-
-  // ── 개별 이명 수정(인라인 편집) ──────────────────────────────────
-  const [editingIndex, setEditingIndex] = useState(null); // 현재 수정 중인 행 index
-  const [editFrom, setEditFrom] = useState("");
-  const [editTo, setEditTo] = useState("");
-  const [editState, setEditState] = useState("idle"); // idle | saving | error
-  const [editError, setEditError] = useState(null);
-
-  const startEdit = (i, s) => {
-    setEditingIndex(i);
-    setEditFrom(s[0]);
-    setEditTo(s[1]);
-    setEditState("idle");
-    setEditError(null);
-  };
-
-  const cancelEdit = () => {
-    setEditingIndex(null);
-    setEditState("idle");
-    setEditError(null);
-  };
-
-  const saveEdit = async (originalFrom) => {
-    const from = editFrom.trim();
-    const to = editTo.trim();
-    if (!from || !to) {
-      setEditState("error");
-      setEditError("표본국명과 공정서국명을 모두 입력해주세요.");
-      return;
-    }
-    setEditState("saving");
-    setEditError(null);
-    try {
-      const res = await fetch("/.netlify/functions/update-synonym", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: "jeju2026!", "표본국명": originalFrom, data: [from, to] }),
-      });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "수정 실패");
-      await reloadSynonyms();
-      setEditingIndex(null);
-      setEditState("idle");
-    } catch (err) {
-      setEditState("error");
-      setEditError("수정 실패: " + err.message);
-    }
-  };
 
   const downloadTemplate = () => {
     const rows = [["표본국명", "공정서국명"], ["예) 참당귀", "당귀"]];
@@ -12066,7 +12014,6 @@ function SynonymsPage({
         }
 
         setUploadState("syncing");
-        // upsert: true → 같은 표본국명이 이미 있으면 공정서국명을 덮어씁니다.
         const res = await fetch("/.netlify/functions/save-synonyms", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -12093,12 +12040,6 @@ function SynonymsPage({
     sub: "표본 데이터의 국명(식물명)과 공정서 데이터의 국명 표기가 다른 경우, 여기서 연결해두면 \"동속 근연 제외\" 통계 계산에 반영됩니다.",
     color: "#1a6b3e"
   });
-
-  // Supabase에는 데이터가 있는데 화면에 안 보이는 경우(RLS 정책 문제 등)를
-  // 더 이상 조용히 무시하지 않고 바로 알려줍니다.
-  const loadErrorBox = synonymsError ? /*#__PURE__*/React.createElement("div", {
-    style: { background: "#fdf0ee", borderRadius: 9, padding: "12px 16px", border: "1px solid #f0b8ae", marginBottom: 14, color: "#c0392b", fontSize: 13 }
-  }, "⚠ 이명 데이터를 불러오지 못했습니다: ", synonymsError, " — Supabase의 species_synonyms 테이블에 조회(SELECT) 권한(RLS 정책)이 있는지 확인해주세요.") : null;
 
   const uploadButtons = /*#__PURE__*/React.createElement("div", {
     style: { display: "flex", gap: 10, flexWrap: "wrap" }
@@ -12158,46 +12099,12 @@ function SynonymsPage({
     errorBox
   );
 
-  const editInputStyle = { padding: "5px 8px", borderRadius: 6, border: "1px solid #b0dcc0", fontSize: 13, width: "100%", boxSizing: "border-box" };
-
-  const listRows = (synonyms || []).map((s, i) => {
-    const isEditing = editingIndex === i;
-    if (isEditing) {
-      return /*#__PURE__*/React.createElement("tr", { key: i, style: { background: "#f6fbf8" } },
-        /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } },
-          /*#__PURE__*/React.createElement("input", { style: editInputStyle, value: editFrom, onChange: e => setEditFrom(e.target.value) })
-        ),
-        /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } },
-          /*#__PURE__*/React.createElement("input", { style: editInputStyle, value: editTo, onChange: e => setEditTo(e.target.value) })
-        ),
-        /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0", whiteSpace: "nowrap" } },
-          /*#__PURE__*/React.createElement("button", {
-            onClick: () => saveEdit(s[0]),
-            disabled: editState === "saving",
-            style: { padding: "4px 10px", borderRadius: 6, border: "none", background: "#1a6b3e", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginRight: 6 }
-          }, editState === "saving" ? "저장 중…" : "저장"),
-          /*#__PURE__*/React.createElement("button", {
-            onClick: cancelEdit,
-            disabled: editState === "saving",
-            style: { padding: "4px 10px", borderRadius: 6, border: "1px solid #cfd8dc", background: "#fff", color: "#546e7a", fontSize: 12, fontWeight: 600, cursor: "pointer" }
-          }, "취소"),
-          editState === "error" && editError ? /*#__PURE__*/React.createElement("div", { style: { color: "#c0392b", fontSize: 11.5, marginTop: 4 } }, editError) : null
-        )
-      );
-    }
-    return /*#__PURE__*/React.createElement("tr", {
-      key: i
-    },
-      /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } }, s[0]),
-      /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } }, s[1]),
-      /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0", whiteSpace: "nowrap" } },
-        /*#__PURE__*/React.createElement("button", {
-          onClick: () => startEdit(i, s),
-          style: { padding: "4px 10px", borderRadius: 6, border: "1px solid #b0dcc0", background: "#f0f9f4", color: "#1a6b3e", fontSize: 12, fontWeight: 600, cursor: "pointer" }
-        }, "수정")
-      )
-    );
-  });
+  const listRows = (synonyms || []).map((s, i) => /*#__PURE__*/React.createElement("tr", {
+    key: i
+  },
+    /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } }, s[0]),
+    /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } }, s[1])
+  ));
 
   const listTable = (!synonyms || synonyms.length === 0) ? /*#__PURE__*/React.createElement("p", {
     style: { fontSize: 13, color: "#95a5a6" }
@@ -12210,8 +12117,7 @@ function SynonymsPage({
       style: { background: "#f6f9f7", position: "sticky", top: 0 }
     },
       /*#__PURE__*/React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid #e0e6e3" } }, "표본국명"),
-      /*#__PURE__*/React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid #e0e6e3" } }, "공정서국명"),
-      /*#__PURE__*/React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid #e0e6e3", width: 90 } }, "")
+      /*#__PURE__*/React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid #e0e6e3" } }, "공정서국명")
     )),
     /*#__PURE__*/React.createElement("tbody", null, listRows)
   ));
@@ -12221,7 +12127,7 @@ function SynonymsPage({
     style: { marginTop: 18 }
   }, listTable);
 
-  return /*#__PURE__*/React.createElement("div", null, header, loadErrorBox, uploadSection, listSection);
+  return /*#__PURE__*/React.createElement("div", null, header, uploadSection, listSection);
 }
 
 function App() {
@@ -12241,22 +12147,13 @@ function App() {
   const [specimensLoading, setSpecimensLoading] = useState(false); // DB 로딩 중
   const [specimensError, setSpecimensError] = useState(null); // DB 오류
   const [synonyms, setSynonyms] = useState([]); // 이명 매핑: [[표본국명, 공정서국명], ...]
-  const [synonymsError, setSynonymsError] = useState(null); // 이명 로딩 실패 시 원인 파악용
   const loadSynonyms = useCallback(async () => {
-    setSynonymsError(null);
     try {
       const res = await fetch("/.netlify/functions/get-synonyms");
       const json = await res.json();
-      if (json.ok) {
-        setSynonyms(json.data || []);
-      } else {
-        // 예전에는 실패해도 조용히 무시했지만, 그러면 Supabase에는 데이터가
-        // 있는데 화면에는 왜 안 보이는지 알 방법이 없었습니다. 이제 원인을
-        // 화면에 표시합니다(예: RLS 정책 문제로 읽기가 막힌 경우 등).
-        setSynonymsError(json.error || "이명 데이터를 불러오지 못했습니다.");
-      }
+      if (json.ok) setSynonyms(json.data || []);
     } catch (e) {
-      setSynonymsError("이명 데이터베이스 연결 실패: " + e.message);
+      // 이명 데이터는 없어도 나머지 기능에 지장이 없으므로 조용히 무시
     }
   }, []);
   const loadAllSpecimens = useCallback(async () => {
@@ -12319,7 +12216,7 @@ function App() {
     label: "총괄"
   }, {
     id: "pharma-search",
-    label: "공정서 검색"
+    label: "공정서 생약"
   }, {
     id: "specimen-search",
     label: "제주 센터 표본"
@@ -12440,7 +12337,6 @@ function App() {
     specimensError: specimensError
   }), page === "pharma" && /*#__PURE__*/React.createElement(PharmaStatsPage, null), page === "specimen" && /*#__PURE__*/React.createElement(SpecimenStatsPage, null), page === "synonyms" && /*#__PURE__*/React.createElement(SynonymsPage, {
     synonyms: synonyms,
-    synonymsError: synonymsError,
     reloadSynonyms: loadSynonyms
   })), /*#__PURE__*/React.createElement("footer", {
     style: {
