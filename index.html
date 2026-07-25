@@ -8902,11 +8902,14 @@ function SpecimenSearchPage({
     URL.revokeObjectURL(url);
   };
 
-  // ── 엑셀 다운로드 (전체 표본, Supabase에서 로드된 전체 데이터) ──────────────────────────
+  // ── 엑셀 다운로드 (현재 검색/필터 조건으로 조회된 데이터만) ──────────────────────────
+  // filtered는 이 컴포넌트 아래쪽에서 storageFilter/familyFilter/pharmaFilter/query를
+  // 모두 반영해 계산되는 배열입니다. 함수 선언 위치는 위에 있지만 실제 호출(클릭)은
+  // 렌더링이 끝난 뒤 일어나므로, 클릭 시점의 filtered 값을 정상적으로 참조합니다.
   const exportToExcel = () => {
-    const data = extraSpec || [];
+    const data = filtered;
     if (data.length === 0) {
-      alert("다운로드할 표본이 없습니다. 데이터베이스 연결 상태를 확인해주세요.");
+      alert("다운로드할 표본이 없습니다. 검색/필터 조건을 확인해주세요.");
       return;
     }
     const COLS = ["관리번호","표본번호","수장고","수장위치","생약명","국명","학명","수집날짜","수집장소","중요도","속명","과명","GPS","공정서","과제명"];
@@ -8914,7 +8917,16 @@ function SpecimenSearchPage({
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "제주센터 표본");
-    XLSX.writeFile(wb, "제주센터_전체표본_" + new Date().toISOString().slice(0,10) + ".xlsx");
+
+    // 파일명에 현재 적용된 필터 조건을 반영 (예: 1수장고, 특정 과, 공정서 조건, 검색어)
+    const filterParts = [];
+    if (storageFilter !== "전체") filterParts.push(storageFilter);
+    if (familyFilter !== "전체") filterParts.push(familyFilter);
+    if (pharmaFilter !== "전체") filterParts.push(pharmaFilter);
+    if (query) filterParts.push(query);
+    const suffix = filterParts.length > 0 ? filterParts.join("_") : "전체표본";
+
+    XLSX.writeFile(wb, `제주센터_${suffix}_` + new Date().toISOString().slice(0,10) + ".xlsx");
   };
 
   // ── 엑셀 업로드 → 파싱 → DB 저장 ──────────────────────────
@@ -9154,7 +9166,7 @@ function SpecimenSearchPage({
       fontSize: 12.5,
       fontWeight: 600
     }
-  }, "⬇ 전체 표본 다운로드"),
+  }, `⬇ 조회 결과 다운로드 (${fmt(filtered.length)}건)`),
   /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setShowUpload(!showUpload);
