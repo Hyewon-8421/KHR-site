@@ -15,9 +15,11 @@ function httpsPost(url, headers, body) {
       headers: { ...headers, "Content-Length": buf.length },
     };
     const req = https.request(options, (res) => {
-      let data = "";
-      res.on("data", chunk => data += chunk);
-      res.on("end", () => resolve({ status: res.statusCode, body: data }));
+      // 응답을 문자열로 바로 이어붙이면 한글이 청크 경계에서 깨질 수 있으므로,
+      // Buffer로 모두 모은 뒤 마지막에 한 번만 UTF-8 문자열로 변환합니다.
+      const chunks = [];
+      res.on("data", chunk => chunks.push(chunk));
+      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
     });
     req.on("error", reject);
     req.write(buf);
@@ -54,7 +56,7 @@ exports.handler = async function(event, context) {
     }
 
     const rows = parsed.rows; // [[표본국명, 공정서국명], ...]
-    const isUpsert = parsed.upsert === true; // true면 같은 표본학명은 덮어씀
+    const isUpsert = parsed.upsert === true; // true면 같은 표본국명은 덮어씀
 
     if (!rows || rows.length === 0) {
       return {
