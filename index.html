@@ -11963,11 +11963,60 @@ function computeSpeciesFromSpecimens(specimens, pharmaData) {
 // ─── 이명 관리 페이지 ─────────────────────────────────────────────────────────
 function SynonymsPage({
   synonyms,
+  synonymsError,
   reloadSynonyms
 }) {
   const [uploadState, setUploadState] = useState("idle"); // idle | parsing | syncing | done | error
   const [uploadResult, setUploadResult] = useState(null);
   const fileInputRef = useRef(null);
+
+  // ── 개별 이명 수정(인라인 편집) ──────────────────────────────────
+  const [editingIndex, setEditingIndex] = useState(null); // 현재 수정 중인 행 index
+  const [editFrom, setEditFrom] = useState("");
+  const [editTo, setEditTo] = useState("");
+  const [editState, setEditState] = useState("idle"); // idle | saving | error
+  const [editError, setEditError] = useState(null);
+
+  const startEdit = (i, s) => {
+    setEditingIndex(i);
+    setEditFrom(s[0]);
+    setEditTo(s[1]);
+    setEditState("idle");
+    setEditError(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingIndex(null);
+    setEditState("idle");
+    setEditError(null);
+  };
+
+  const saveEdit = async (originalFrom) => {
+    const from = editFrom.trim();
+    const to = editTo.trim();
+    if (!from || !to) {
+      setEditState("error");
+      setEditError("표본국명과 공정서국명을 모두 입력해주세요.");
+      return;
+    }
+    setEditState("saving");
+    setEditError(null);
+    try {
+      const res = await fetch("/.netlify/functions/update-synonym", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: "jeju2026!", "표본국명": originalFrom, data: [from, to] }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "수정 실패");
+      await reloadSynonyms();
+      setEditingIndex(null);
+      setEditState("idle");
+    } catch (err) {
+      setEditState("error");
+      setEditError("수정 실패: " + err.message);
+    }
+  };
 
   const downloadTemplate = () => {
     const rows = [["표본국명", "공정서국명"], ["예) 참당귀", "당귀"]];
@@ -12017,6 +12066,7 @@ function SynonymsPage({
         }
 
         setUploadState("syncing");
+        // upsert: true → 같은 표본국명이 이미 있으면 공정서국명을 덮어씁니다.
         const res = await fetch("/.netlify/functions/save-synonyms", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -12043,6 +12093,12 @@ function SynonymsPage({
     sub: "표본 데이터의 국명(식물명)과 공정서 데이터의 국명 표기가 다른 경우, 여기서 연결해두면 \"동속 근연 제외\" 통계 계산에 반영됩니다.",
     color: "#1a6b3e"
   });
+
+  // Supabase에는 데이터가 있는데 화면에 안 보이는 경우(RLS 정책 문제 등)를
+  // 더 이상 조용히 무시하지 않고 바로 알려줍니다.
+  const loadErrorBox = synonymsError ? /*#__PURE__*/React.createElement("div", {
+    style: { background: "#fdf0ee", borderRadius: 9, padding: "12px 16px", border: "1px solid #f0b8ae", marginBottom: 14, color: "#c0392b", fontSize: 13 }
+  }, "⚠ 이명 데이터를 불러오지 못했습니다: ", synonymsError, " — Supabase의 species_synonyms 테이블에 조회(SELECT) 권한(RLS 정책)이 있는지 확인해주세요.") : null;
 
   const uploadButtons = /*#__PURE__*/React.createElement("div", {
     style: { display: "flex", gap: 10, flexWrap: "wrap" }
@@ -12102,12 +12158,46 @@ function SynonymsPage({
     errorBox
   );
 
-  const listRows = (synonyms || []).map((s, i) => /*#__PURE__*/React.createElement("tr", {
-    key: i
-  },
-    /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } }, s[0]),
-    /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } }, s[1])
-  ));
+  const editInputStyle = { padding: "5px 8px", borderRadius: 6, border: "1px solid #b0dcc0", fontSize: 13, width: "100%", boxSizing: "border-box" };
+
+  const listRows = (synonyms || []).map((s, i) => {
+    const isEditing = editingIndex === i;
+    if (isEditing) {
+      return /*#__PURE__*/React.createElement("tr", { key: i, style: { background: "#f6fbf8" } },
+        /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } },
+          /*#__PURE__*/React.createElement("input", { style: editInputStyle, value: editFrom, onChange: e => setEditFrom(e.target.value) })
+        ),
+        /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } },
+          /*#__PURE__*/React.createElement("input", { style: editInputStyle, value: editTo, onChange: e => setEditTo(e.target.value) })
+        ),
+        /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0", whiteSpace: "nowrap" } },
+          /*#__PURE__*/React.createElement("button", {
+            onClick: () => saveEdit(s[0]),
+            disabled: editState === "saving",
+            style: { padding: "4px 10px", borderRadius: 6, border: "none", background: "#1a6b3e", color: "#fff", fontSize: 12, fontWeight: 600, cursor: "pointer", marginRight: 6 }
+          }, editState === "saving" ? "저장 중…" : "저장"),
+          /*#__PURE__*/React.createElement("button", {
+            onClick: cancelEdit,
+            disabled: editState === "saving",
+            style: { padding: "4px 10px", borderRadius: 6, border: "1px solid #cfd8dc", background: "#fff", color: "#546e7a", fontSize: 12, fontWeight: 600, cursor: "pointer" }
+          }, "취소"),
+          editState === "error" && editError ? /*#__PURE__*/React.createElement("div", { style: { color: "#c0392b", fontSize: 11.5, marginTop: 4 } }, editError) : null
+        )
+      );
+    }
+    return /*#__PURE__*/React.createElement("tr", {
+      key: i
+    },
+      /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } }, s[0]),
+      /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0" } }, s[1]),
+      /*#__PURE__*/React.createElement("td", { style: { padding: "7px 12px", borderBottom: "1px solid #f0f2f0", whiteSpace: "nowrap" } },
+        /*#__PURE__*/React.createElement("button", {
+          onClick: () => startEdit(i, s),
+          style: { padding: "4px 10px", borderRadius: 6, border: "1px solid #b0dcc0", background: "#f0f9f4", color: "#1a6b3e", fontSize: 12, fontWeight: 600, cursor: "pointer" }
+        }, "수정")
+      )
+    );
+  });
 
   const listTable = (!synonyms || synonyms.length === 0) ? /*#__PURE__*/React.createElement("p", {
     style: { fontSize: 13, color: "#95a5a6" }
@@ -12120,7 +12210,8 @@ function SynonymsPage({
       style: { background: "#f6f9f7", position: "sticky", top: 0 }
     },
       /*#__PURE__*/React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid #e0e6e3" } }, "표본국명"),
-      /*#__PURE__*/React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid #e0e6e3" } }, "공정서국명")
+      /*#__PURE__*/React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid #e0e6e3" } }, "공정서국명"),
+      /*#__PURE__*/React.createElement("th", { style: { textAlign: "left", padding: "8px 12px", borderBottom: "1px solid #e0e6e3", width: 90 } }, "")
     )),
     /*#__PURE__*/React.createElement("tbody", null, listRows)
   ));
@@ -12130,7 +12221,7 @@ function SynonymsPage({
     style: { marginTop: 18 }
   }, listTable);
 
-  return /*#__PURE__*/React.createElement("div", null, header, uploadSection, listSection);
+  return /*#__PURE__*/React.createElement("div", null, header, loadErrorBox, uploadSection, listSection);
 }
 
 function App() {
@@ -12150,13 +12241,22 @@ function App() {
   const [specimensLoading, setSpecimensLoading] = useState(false); // DB 로딩 중
   const [specimensError, setSpecimensError] = useState(null); // DB 오류
   const [synonyms, setSynonyms] = useState([]); // 이명 매핑: [[표본국명, 공정서국명], ...]
+  const [synonymsError, setSynonymsError] = useState(null); // 이명 로딩 실패 시 원인 파악용
   const loadSynonyms = useCallback(async () => {
+    setSynonymsError(null);
     try {
       const res = await fetch("/.netlify/functions/get-synonyms");
       const json = await res.json();
-      if (json.ok) setSynonyms(json.data || []);
+      if (json.ok) {
+        setSynonyms(json.data || []);
+      } else {
+        // 예전에는 실패해도 조용히 무시했지만, 그러면 Supabase에는 데이터가
+        // 있는데 화면에는 왜 안 보이는지 알 방법이 없었습니다. 이제 원인을
+        // 화면에 표시합니다(예: RLS 정책 문제로 읽기가 막힌 경우 등).
+        setSynonymsError(json.error || "이명 데이터를 불러오지 못했습니다.");
+      }
     } catch (e) {
-      // 이명 데이터는 없어도 나머지 기능에 지장이 없으므로 조용히 무시
+      setSynonymsError("이명 데이터베이스 연결 실패: " + e.message);
     }
   }, []);
   const loadAllSpecimens = useCallback(async () => {
@@ -12340,6 +12440,7 @@ function App() {
     specimensError: specimensError
   }), page === "pharma" && /*#__PURE__*/React.createElement(PharmaStatsPage, null), page === "specimen" && /*#__PURE__*/React.createElement(SpecimenStatsPage, null), page === "synonyms" && /*#__PURE__*/React.createElement(SynonymsPage, {
     synonyms: synonyms,
+    synonymsError: synonymsError,
     reloadSynonyms: loadSynonyms
   })), /*#__PURE__*/React.createElement("footer", {
     style: {
