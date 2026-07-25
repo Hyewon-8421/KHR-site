@@ -8122,7 +8122,17 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
     return "미등재";
   }
 
-  function uniqueSpecies(rows) {
+  // "기원종 수"는 국명(국문 식물명) 기준으로 센다. 학명은 저자 표기 등으로 이명이
+  // 많아 엑셀에서 세는 방식과 어긋나기 쉬우므로, 사람이 직접 확인하는 국명을 기준으로 삼는다.
+  function uniqueKorNames(rows) {
+    const set = new Set();
+    rows.forEach(r => { const s = (r[5] || "").trim(); if (s) set.add(s); });
+    return set;
+  }
+
+  // 학명 기준 집합은 공정서 원료(학명) 커버리지 대조에만 쓴다 — 공정서 데이터 자체가
+  // 학명으로 기원종을 정의하고 있어서, 그 대조만큼은 학명 기준을 유지해야 한다.
+  function uniqueSciNames(rows) {
     const set = new Set();
     rows.forEach(r => { const s = (r[6] || "").trim(); if (s) set.add(s); });
     return set;
@@ -8141,18 +8151,18 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
     return { total, kp, khp, both, none, kpPct: pctOf(kp, total), khpPct: pctOf(khp, total), bothPct: pctOf(both, total), nonePct: pctOf(none, total) };
   }
 
-  // 종(학명) 단위 집계: 같은 종의 표본들 중 하나라도 KP 표시가 있으면 그 종은 KP로,
+  // 종(국명) 단위 집계: 같은 국명의 표본들 중 하나라도 KP 표시가 있으면 그 종은 KP로,
   // KP가 없고 KHP 표시가 있으면 KHP로, 어느 표본에도 표시가 없으면 미등재로 분류한다.
   function speciesLevelStats(rows, classify) {
-    const speciesPharma = new Map(); // sciName -> "KP" | "KHP" | "미등재"
+    const speciesPharma = new Map(); // korName -> "KP" | "KHP" | "미등재"
     rows.forEach(r => {
-      const sci = (r[6] || "").trim();
-      if (!sci) return;
+      const kor = (r[5] || "").trim();
+      if (!kor) return;
       const p = classify(r);
-      const cur = speciesPharma.get(sci);
-      if (p === "KP" || cur === "KP") speciesPharma.set(sci, "KP");
-      else if (p === "KHP" || cur === "KHP") speciesPharma.set(sci, "KHP");
-      else if (!cur) speciesPharma.set(sci, "미등재");
+      const cur = speciesPharma.get(kor);
+      if (p === "KP" || cur === "KP") speciesPharma.set(kor, "KP");
+      else if (p === "KHP" || cur === "KHP") speciesPharma.set(kor, "KHP");
+      else if (!cur) speciesPharma.set(kor, "미등재");
     });
     let kp = 0, khp = 0, none = 0;
     speciesPharma.forEach(p => {
@@ -8188,7 +8198,8 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
   const storage1Rows = specimens.filter(r => (r[2] || "").includes("1수장고"));
   const storage3Rows = specimens.filter(r => (r[2] || "").includes("3수장고"));
 
-  const allSpeciesSet = uniqueSpecies(specimens);
+  const allKorNameSet = uniqueKorNames(specimens); // 기원종 수(국명 기준)
+  const allSciNameSet = uniqueSciNames(specimens); // 공정서 원료 커버리지 대조용(학명 기준)
   const specimenPharmAll = specimenLevelStats(specimens, classifyIncl);
   const specimenPharmAllExcl = specimenLevelStats(specimens, classifyExcl);
   const speciesPharmAll = speciesLevelStats(specimens, classifyIncl);
@@ -8206,7 +8217,7 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
   let coveredOrigins = 0, kpOrigins = 0, khpOrigins = 0;
   originGroups.forEach(group => {
     let covered = false;
-    group.sciNames.forEach(sci => { if (allSpeciesSet.has(sci)) covered = true; });
+    group.sciNames.forEach(sci => { if (allSciNameSet.has(sci)) covered = true; });
     if (covered) coveredOrigins++;
     if (group.types.has("KP")) kpOrigins++; // KP·KHP 동시 등재는 KP로 집계
     else if (group.types.has("KHP")) khpOrigins++;
@@ -8223,7 +8234,7 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
       },
       specimens: {
         total: specimens.length,
-        species: allSpeciesSet.size
+        species: allKorNameSet.size
       },
       specimenPharm: specimenPharmAll,
       specimenPharmExcl: specimenPharmAllExcl,
@@ -11901,25 +11912,25 @@ function computeSpeciesFromSpecimens(specimens, pharmaData) {
   function groupBy(rows) {
     const map = new Map();
     (rows || []).forEach(r => {
-      const sciName = (r[6] || "").trim();
-      if (!sciName) return;
-      if (!map.has(sciName)) {
-        map.set(sciName, {
-          korName: r[5] || "",
+      const korName = (r[5] || "").trim();
+      if (!korName) return;
+      if (!map.has(korName)) {
+        map.set(korName, {
+          korName,
           alias: "",
           drugName: r[4] || "",
           drugAlias: "",
           family: r[11] || "",
-          sciName,
+          sciName: r[6] || "",
           count: 0,
           pharma: "미등재"
         });
       }
-      const entry = map.get(sciName);
+      const entry = map.get(korName);
       entry.count += 1;
-      if (!entry.korName && r[5]) entry.korName = r[5];
       if (!entry.drugName && r[4]) entry.drugName = r[4];
       if (!entry.family && r[11]) entry.family = r[11];
+      if (!entry.sciName && r[6]) entry.sciName = r[6];
       // 같은 종의 표본 중 하나라도 KP면 KP, 그 다음 KHP가 있으면 KHP로 승격
       const p = pharmaOf(r[13]);
       if (p === "KP") entry.pharma = "KP";
