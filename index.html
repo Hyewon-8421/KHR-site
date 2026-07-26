@@ -8231,9 +8231,13 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
 
   const totalOrigins = originGroups.size; // 558종이 나와야 함
   let coveredOrigins = 0, kpOrigins = 0, khpOrigins = 0;
+  const heldOriginNames = new Set(); // 공정서 생약 페이지에서 "보유" 배지/필터에 쓸 기원종(국명) 집합
   originGroups.forEach((group, originName) => {
     // 표본 국명(이명 매핑 적용)이 이 기원종 국명과 일치하면 "보유"로 센다.
-    if (resolvedSpecimenKorNames.has(originName)) coveredOrigins++;
+    if (resolvedSpecimenKorNames.has(originName)) {
+      coveredOrigins++;
+      heldOriginNames.add(originName);
+    }
     if (group.types.has("KP")) kpOrigins++; // KP·KHP 동시 등재는 KP로 집계
     else if (group.types.has("KHP")) khpOrigins++;
   });
@@ -8263,6 +8267,10 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
         none: speciesPharmS1.none,
         bothPct: speciesPharmS1.bothPct,
         speciesExcl: speciesPharmS1Excl.total,
+        kpExcl: speciesPharmS1Excl.kp,
+        khpExcl: speciesPharmS1Excl.khp,
+        bothExcl: speciesPharmS1Excl.both,
+        noneExcl: speciesPharmS1Excl.none,
         bothPctExcl: speciesPharmS1Excl.bothPct
       },
       storage3: {
@@ -8273,6 +8281,10 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
         none: speciesPharmS3.none,
         bothPct: speciesPharmS3.bothPct,
         speciesExcl: speciesPharmS3Excl.total,
+        kpExcl: speciesPharmS3Excl.kp,
+        khpExcl: speciesPharmS3Excl.khp,
+        bothExcl: speciesPharmS3Excl.both,
+        noneExcl: speciesPharmS3Excl.none,
         bothPctExcl: speciesPharmS3Excl.bothPct
       },
       originCoverage: {
@@ -8309,7 +8321,8 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
       noneExcl: specimenPharmS3Excl.none,
       topFamilies: topFamiliesOf(storage3Rows, 15),
       importance: importanceOf(storage3Rows)
-    }
+    },
+    heldOriginNames // 공정서 생약 페이지: 이 Set에 있는 국명 = 제주센터 보유 기원종
   };
 }
 window.__STATS__ = computeStatsFromSpecimens([], window.__PHARMA__, []); // 표본 로딩 전 기본값(0으로 채워진 형태) 확보
@@ -8363,10 +8376,14 @@ function PharmaModal({
   drug,
   onClose
 }) {
+  const [selectedOrigin, setSelectedOrigin] = useState(null); // "보유" 배지를 클릭한 기원종(표본 목록 보기용)
   if (!drug) return null;
   const typeColor = drug.type === "KP" ? "#1a4a7a" : drug.type === "KHP" ? "#1a6b3e" : "#7a4a1a";
   const typeBg = drug.type === "KP" ? "#e6f1fb" : drug.type === "KHP" ? "#e8f5ee" : "#faeeda";
-  return /*#__PURE__*/React.createElement(Modal, {
+  // 제주센터가 표본으로 보유 중인 기원종(국명) 집합 — 공정서 생약 목록/필터와 같은 기준
+  const heldSet = window.__STATS__?.heldOriginNames || new Set();
+  const isHeld = originName => heldSet.has(originName);
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Modal, {
     onClose: onClose
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -8453,18 +8470,36 @@ function PharmaModal({
       color: "#1a2e1a",
       fontSize: 15
     }
-  }, o.origin), /*#__PURE__*/React.createElement("span", {
+  }, o.origin), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 6,
+      flexShrink: 0,
+      marginLeft: 8,
+      alignItems: "center"
+    }
+  }, isHeld(o.origin) && /*#__PURE__*/React.createElement("span", {
+    onClick: () => setSelectedOrigin(o.origin),
+    title: "제주센터 보유 표본 보기",
+    style: {
+      background: "#fdeee0",
+      color: "#e67e22",
+      borderRadius: 5,
+      padding: "2px 8px",
+      fontSize: 11,
+      fontWeight: 700,
+      cursor: "pointer"
+    }
+  }, "보유 ›"), /*#__PURE__*/React.createElement("span", {
     style: {
       background: o.type === "KP" ? "#e6f1fb" : "#e8f5ee",
       color: o.type === "KP" ? "#1a4a7a" : "#1a6b3e",
       borderRadius: 5,
       padding: "2px 8px",
       fontSize: 11,
-      fontWeight: 700,
-      flexShrink: 0,
-      marginLeft: 8
+      fontWeight: 700
     }
-  }, o.type)), /*#__PURE__*/React.createElement("div", {
+  }, o.type))), /*#__PURE__*/React.createElement("div", {
     style: {
       fontStyle: "italic",
       color: "#546e7a",
@@ -8480,7 +8515,86 @@ function PharmaModal({
       marginTop: 4,
       flexWrap: "wrap"
     }
-  }, /*#__PURE__*/React.createElement("span", null, "과명: ", o.family?.split("/")[0]), o.alias && /*#__PURE__*/React.createElement("span", null, "이명: ", o.alias))))));
+  }, /*#__PURE__*/React.createElement("span", null, "과명: ", o.family?.split("/")[0]), o.alias && /*#__PURE__*/React.createElement("span", null, "이명: ", o.alias)))))), selectedOrigin && /*#__PURE__*/React.createElement(OriginSpecimenModal, {
+    originName: selectedOrigin,
+    onClose: () => setSelectedOrigin(null)
+  }));
+}
+
+// ─── 기원종(보유) 표본 목록 모달 ───────────────────────────────────────────────
+// 공정서 생약 페이지에서 "보유" 배지를 클릭했을 때, 그 기원종에 해당하는
+// 제주센터 표본 목록을 보여주고, 표본 하나를 클릭하면 상세 정보(SpecimenModal)를
+// 띄운다. "보유" 판정과 정확히 같은 기준(국명 + 이명 매핑, 공정서 칸에 KP/KHP
+// 표시된 표본만)으로 목록을 만든다.
+function OriginSpecimenModal({
+  originName,
+  onClose
+}) {
+  const [selectedSpec, setSelectedSpec] = useState(null);
+  const synonymMap = new Map(window.__SYNONYMS__ || []);
+  const specimens = window.__SPEC__ || [];
+  const specList = specimens.filter(sp => {
+    const kor = (sp[5] || "").trim();
+    const resolved = synonymMap.get(kor) || kor;
+    if (resolved !== originName) return false;
+    const ph = (sp[13] || "").trim();
+    return ph.includes("KP") || ph.includes("KHP");
+  }).slice(0, 50);
+
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Modal, {
+    onClose: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { padding: "22px 24px 24px" }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 19, fontWeight: 700, color: "#1a2e1a", marginBottom: 4 }
+  }, originName), /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 12, color: "#7f8c8d" }
+  }, "제주센터 보유 표본 ", specList.length, "건")), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    style: { background: "#f4f8f4", border: "none", borderRadius: 7, width: 30, height: 30, cursor: "pointer", fontSize: 16, color: "#546e7a" }
+  }, "✕")), specList.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    style: { textAlign: "center", padding: 20, color: "#95a5a6", fontSize: 12.5 }
+  }, "매칭되는 표본 데이터가 없습니다.") : specList.map((sp, i) => {
+    const [id,, stor,, dn, kn,, cd,,,,, gps, ph] = sp;
+    const sc = stor === "1수장고" ? "#1a6b3e" : "#1a4a7a";
+    const sb = stor === "1수장고" ? "#e8f5ee" : "#e6f1fb";
+    return /*#__PURE__*/React.createElement("div", {
+      key: id + i,
+      onClick: () => setSelectedSpec(sp),
+      style: {
+        padding: "9px 12px",
+        borderRadius: 8,
+        background: i % 2 === 0 ? "#f8fafb" : "#fff",
+        border: "1px solid #eef2f5",
+        marginBottom: 6,
+        cursor: "pointer",
+        transition: "background .12s"
+      },
+      onMouseEnter: e => e.currentTarget.style.background = "#eef6f0",
+      onMouseLeave: e => e.currentTarget.style.background = i % 2 === 0 ? "#f8fafb" : "#fff"
+    }, /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 3 }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: { fontWeight: 600, fontSize: 12.5, color: "#1a2e1a" }
+    }, kn), /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", gap: 4, flexShrink: 0, marginLeft: 7 }
+    }, ph && /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: 10, fontWeight: 600, background: "#e6f1fb", color: "#1a4a7a", borderRadius: 4, padding: "1px 5px" }
+    }, ph), /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: 10, fontWeight: 600, background: sb, color: sc, borderRadius: 4, padding: "1px 5px" }
+    }, stor), /*#__PURE__*/React.createElement("span", {
+      style: { fontSize: 13, color: "#bdc3c7", marginLeft: 2 }
+    }, "›"))), /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", gap: 12, fontSize: 10.5, color: "#95a5a6" }
+    }, /*#__PURE__*/React.createElement("span", {
+      style: { fontFamily: "monospace" }
+    }, id), cd && /*#__PURE__*/React.createElement("span", null, cd)));
+  }))), selectedSpec && /*#__PURE__*/React.createElement(SpecimenModal, {
+    spec: selectedSpec,
+    onClose: () => setSelectedSpec(null)
+  }));
 }
 
 // ─── 표본 상세 모달 ───────────────────────────────────────────────────────────
@@ -8702,15 +8816,25 @@ function PharmaSearchPage() {
   const [typeFilter, setTypeFilter] = useState("전체");
   const [familyFilter, setFamilyFilter] = useState("전체");
   const [partFilter, setPartFilter] = useState("전체");
+  const [heldFilter, setHeldFilter] = useState("전체"); // 전체 | 보유 | 미보유 (제주센터 표본 보유 여부)
   const [selectedDrug, setSelectedDrug] = useState(null);
+  const [selectedOrigin, setSelectedOrigin] = useState(null); // "보유" 배지를 클릭한 기원종(표본 목록 보기용)
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
+  // 제주센터가 표본으로 보유 중인 기원종(국명) 집합 — 대시보드 "공정서 기원종 보유율"과 같은 기준
+  const heldSet = window.__STATS__?.heldOriginNames || new Set();
+  const isHeld = originName => heldSet.has(originName);
   const families = ["전체", ...Array.from(new Set(PHARMA_DATA.map(d => d.family?.split("/")[0]).filter(Boolean))).sort()];
   const parts = ["전체", ...Array.from(new Set(PHARMA_DATA.map(d => d.part).filter(Boolean))).sort()];
   const filtered = PHARMA_DATA.filter(d => {
     if (typeFilter !== "전체" && d.type !== typeFilter) return false;
     if (familyFilter !== "전체" && d.family?.split("/")[0] !== familyFilter) return false;
     if (partFilter !== "전체" && d.part !== partFilter) return false;
+    // "보유": 기원종 중 하나라도 제주센터가 표본으로 갖고 있으면 포함
+    // "미보유": 기원종이 전부 제주센터에 없는 경우만 포함
+    const anyHeld = d.origins?.some(o => isHeld(o.origin));
+    if (heldFilter === "보유" && !anyHeld) return false;
+    if (heldFilter === "미보유" && anyHeld) return false;
     if (query) {
       const q = query.toLowerCase();
       return d.name?.includes(q) || d.origins?.some(o => o.origin?.toLowerCase().includes(q) || o.sciName?.toLowerCase().includes(q));
@@ -8729,9 +8853,20 @@ function PharmaSearchPage() {
   };
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SectionHeader, {
     title: "공정서 생약 검색",
-    sub: "KP · KHP 등재 생약 식물 유래 기원종 446종 전체 검색",
+    sub: "KP · KHP 등재 식물류 생약 443개 · 기원종 558종 전체 검색",
     color: "#2563a6"
-  }), /*#__PURE__*/React.createElement(SearchBar, {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#eef6fb",
+      border: "1px solid #cfe4f2",
+      borderRadius: 9,
+      padding: "10px 14px",
+      marginBottom: 16,
+      fontSize: 12.5,
+      color: "#2563a6",
+      lineHeight: 1.6
+    }
+  }, "ℹ️ 식물류 생약은 총 ", /*#__PURE__*/React.createElement("b", null, "443개"), "이며, 기원종은 총 ", /*#__PURE__*/React.createElement("b", null, "558종"), "입니다. 이와 별도로 ", /*#__PURE__*/React.createElement("b", null, "다엽가루, 오르소시폰가루, 정제부자"), " 3개 품목의 데이터도 함께 제공하고 있습니다 (식물류 생약 443개 집계에는 포함되지 않지만, 기원종 558종 집계에는 포함됩니다)."), /*#__PURE__*/React.createElement(SearchBar, {
     value: query,
     onChange: handleSearch,
     placeholder: "생약명, 기원종명, 학명으로 검색..."
@@ -8757,6 +8892,11 @@ function PharmaSearchPage() {
     value: partFilter,
     options: parts,
     onChange: handleFilter(setPartFilter)
+  }), /*#__PURE__*/React.createElement(FilterSelect, {
+    label: "제주센터 보유",
+    value: heldFilter,
+    options: ["전체", "보유", "미보유"],
+    onChange: handleFilter(setHeldFilter)
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       marginLeft: "auto",
@@ -8814,7 +8954,11 @@ function PharmaSearchPage() {
     style: {
       fontSize: 12,
       color: "#2c3e50",
-      marginBottom: j < drug.origins.length - 1 ? 3 : 0
+      marginBottom: j < drug.origins.length - 1 ? 3 : 0,
+      display: "flex",
+      alignItems: "center",
+      gap: 5,
+      flexWrap: "wrap"
     }
   }, o.origin, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -8823,7 +8967,23 @@ function PharmaSearchPage() {
       marginLeft: 4,
       fontSize: 11
     }
-  }, o.sciName?.substring(0, 30), o.sciName?.length > 30 ? "…" : "")))), /*#__PURE__*/React.createElement("span", {
+  }, o.sciName?.substring(0, 30), o.sciName?.length > 30 ? "…" : ""), isHeld(o.origin) && /*#__PURE__*/React.createElement("span", {
+    onClick: e => {
+      e.stopPropagation();
+      setSelectedOrigin(o.origin);
+    },
+    title: "제주센터 보유 표본 보기",
+    style: {
+      fontSize: 10,
+      fontWeight: 700,
+      background: "#fdeee0",
+      color: "#e67e22",
+      borderRadius: 4,
+      padding: "1px 6px",
+      flexShrink: 0,
+      cursor: "pointer"
+    }
+  }, "보유 ›")))), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
       color: "#546e7a"
@@ -8851,6 +9011,9 @@ function PharmaSearchPage() {
   }), selectedDrug && /*#__PURE__*/React.createElement(PharmaModal, {
     drug: selectedDrug,
     onClose: () => setSelectedDrug(null)
+  }), selectedOrigin && /*#__PURE__*/React.createElement(OriginSpecimenModal, {
+    originName: selectedOrigin,
+    onClose: () => setSelectedOrigin(null)
   }));
 }
 
@@ -10451,29 +10614,33 @@ function PharmaStatsPage() {
 // ─── 표본 통계 페이지 ─────────────────────────────────────────────────────────
 function SpecimenStatsPage() {
   const [tab, setTab] = useState("overview");
+  const [pharmaMode, setPharmaMode] = useState("incl"); // "incl" 동속 근연 포함 | "excl" 동속 근연 제외
   const s = window.__STATS__.summary;
   const st = window.__STATS__;
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SectionHeader, {
-    title: "제주센터 표본 현황 통계",
-    sub: `국립생약자원관 제주 센터 수장 표본 현황 — 총 ${fmt(s.specimens.total)}점`,
-    color: "#1a6b3e"
-  }), /*#__PURE__*/React.createElement("div", {
+  const incl = pharmaMode === "incl";
+  const specimenPharmView = incl ? s.specimenPharm : s.specimenPharmExcl;
+  const speciesPharmView = incl ? s.speciesPharm : s.speciesPharmExcl;
+
+  const modeToggle = /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: 7, marginBottom: 20 }
+  }, [{ id: "incl", label: "동속 근연 포함" }, { id: "excl", label: "동속 근연 제외" }].map(m => /*#__PURE__*/React.createElement("button", {
+    key: m.id,
+    onClick: () => setPharmaMode(m.id),
     style: {
-      display: "flex",
-      gap: 7,
-      marginBottom: 20,
-      flexWrap: "wrap"
+      padding: "6px 14px",
+      borderRadius: 16,
+      border: "none",
+      cursor: "pointer",
+      fontWeight: 600,
+      fontSize: 12,
+      background: pharmaMode === m.id ? "#1a6b3e" : "#f0f4f2",
+      color: pharmaMode === m.id ? "#fff" : "#4a6050"
     }
-  }, [{
-    id: "overview",
-    label: "전체 현황"
-  }, {
-    id: "s1",
-    label: "제1수장고"
-  }, {
-    id: "s3",
-    label: "제3수장고"
-  }].map(t => /*#__PURE__*/React.createElement("button", {
+  }, m.label)));
+
+  const tabButtons = /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: 7, marginBottom: 20, flexWrap: "wrap" }
+  }, [{ id: "overview", label: "전체 현황" }, { id: "s1", label: "제1수장고" }, { id: "s3", label: "제3수장고" }].map(t => /*#__PURE__*/React.createElement("button", {
     key: t.id,
     onClick: () => setTab(t.id),
     style: {
@@ -10487,284 +10654,176 @@ function SpecimenStatsPage() {
       color: tab === t.id ? "#fff" : "#4a6050",
       transition: "all 0.2s"
     }
-  }, t.label))), tab === "overview" && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
-      gap: 12,
-      marginBottom: 20
-    }
-  }, /*#__PURE__*/React.createElement(StatCard, {
-    label: "전체 표본",
-    value: `${fmt(s.specimens.total)}점`,
-    accent: "#1a6b3e"
-  }), /*#__PURE__*/React.createElement(StatCard, {
-    label: "전체 식물종",
-    value: `${fmt(s.specimens.species)}종`,
-    accent: "#1a6b3e"
-  }), /*#__PURE__*/React.createElement(StatCard, {
-    label: "제1수장고",
-    value: `${fmt(st.storage1.total)}점`,
-    sub: `${fmt(s.storage1.species)} 기원종`,
-    accent: "#2d9c63"
-  }), /*#__PURE__*/React.createElement(StatCard, {
-    label: "제3수장고",
-    value: `${fmt(st.storage3.total)}점`,
-    sub: `${fmt(s.storage3.species)} 기원종`,
-    accent: "#1a4a7a"
-  })), /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: 18,
-      marginBottom: 18
-    }
-  }, /*#__PURE__*/React.createElement(Section, {
-    title: "표본 공정서 등재율"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 18
-    }
-  }, /*#__PURE__*/React.createElement(DonutChart, {
-    segments: [{
-      pct: s.specimenPharm.bothPct,
-      color: "#1a6b3e"
-    }, {
-      pct: 100 - s.specimenPharm.bothPct,
-      color: "#e8eded"
-    }]
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1
-    }
-  }, /*#__PURE__*/React.createElement(LegendItem, {
-    color: "#1a6b3e",
-    label: "공정서 등재",
-    value: `${fmt(s.specimenPharm.both)}점 (${s.specimenPharm.bothPct}%)`
-  }), /*#__PURE__*/React.createElement(LegendItem, {
-    color: "#4bbf84",
-    label: "KP",
-    value: `${fmt(s.specimenPharm.kp)}점`
-  }), /*#__PURE__*/React.createElement(LegendItem, {
-    color: "#78d4a4",
-    label: "KHP",
-    value: `${fmt(s.specimenPharm.khp)}점`
-  }), /*#__PURE__*/React.createElement(LegendItem, {
-    color: "#e8eded",
-    label: "미등재",
-    value: `${fmt(s.specimenPharm.none)}점`,
-    border: true
-  })))), /*#__PURE__*/React.createElement(Section, {
-    title: "식물종 공정서 등재율"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      alignItems: "center",
-      gap: 18
-    }
-  }, /*#__PURE__*/React.createElement(DonutChart, {
-    segments: [{
-      pct: s.speciesPharm.bothPct,
-      color: "#2563a6"
-    }, {
-      pct: 100 - s.speciesPharm.bothPct,
-      color: "#e8eded"
-    }]
-  }), /*#__PURE__*/React.createElement("div", {
-    style: {
-      flex: 1
-    }
-  }, /*#__PURE__*/React.createElement(LegendItem, {
-    color: "#2563a6",
-    label: "공정서 등재",
-    value: `${fmt(s.speciesPharm.both)}종 (${s.speciesPharm.bothPct}%)`
-  }), /*#__PURE__*/React.createElement(LegendItem, {
-    color: "#3d87cf",
-    label: "KP",
-    value: `${fmt(s.speciesPharm.kp)}종`
-  }), /*#__PURE__*/React.createElement(LegendItem, {
-    color: "#6aaae0",
-    label: "KHP",
-    value: `${fmt(s.speciesPharm.khp)}종`
-  }), /*#__PURE__*/React.createElement(LegendItem, {
-    color: "#e8eded",
-    label: "미등재",
-    value: `${fmt(s.speciesPharm.none)}종`,
-    border: true
-  }))))), /*#__PURE__*/React.createElement(Section, {
-    title: "수장고별 식물종 공정서 등재율 비교"
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: 16
-    }
-  }, [{
-    title: "제1수장고",
-    total: 958,
-    kp: 156,
-    khp: 286,
-    both: 442,
-    none: 516,
-    color: "#1a6b3e"
-  }, {
-    title: "제3수장고",
-    total: 429,
-    kp: 44,
-    khp: 83,
-    both: 127,
-    none: 302,
-    color: "#1a4a7a"
-  }].map(x => /*#__PURE__*/React.createElement("div", {
-    key: x.title,
-    style: {
-      background: "#f8fafb",
-      borderRadius: 10,
-      padding: 14,
-      borderLeft: `4px solid ${x.color}`
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontWeight: 700,
-      color: x.color,
-      marginBottom: 10,
-      fontSize: 14
-    }
-  }, x.title), /*#__PURE__*/React.createElement(BarRow, {
-    label: "공정서 등재",
-    count: x.both,
-    max: x.total,
-    total: x.total,
-    color: x.color
-  }), /*#__PURE__*/React.createElement(BarRow, {
-    label: "KP 등재",
-    count: x.kp,
-    max: x.total,
-    total: x.total,
-    color: x.color + "99"
-  }), /*#__PURE__*/React.createElement(BarRow, {
-    label: "KHP 등재",
-    count: x.khp,
-    max: x.total,
-    total: x.total,
-    color: x.color + "66"
-  }), /*#__PURE__*/React.createElement(BarRow, {
-    label: "미등재",
-    count: x.none,
-    max: x.total,
-    total: x.total,
-    color: "#bdc3c7"
-  })))), /*#__PURE__*/React.createElement("p", {
-    style: {
-      fontSize: 11,
-      color: "#95a5a6",
-      marginTop: 10
-    }
-  }, "* 동속 근연 포함 기준"))), (tab === "s1" || tab === "s3") && (() => {
-    const data = tab === "s1" ? window.__STATS__.storage1 : window.__STATS__.storage3;
+  }, t.label)));
+
+  const overviewSection = tab === "overview" && /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement("div", {
+      style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 20 }
+    },
+      /*#__PURE__*/React.createElement(StatCard, { label: "전체 표본", value: `${fmt(s.specimens.total)}점`, accent: "#1a6b3e" }),
+      /*#__PURE__*/React.createElement(StatCard, { label: "전체 식물종", value: `${fmt(s.specimens.species)}종`, accent: "#1a6b3e" }),
+      /*#__PURE__*/React.createElement(StatCard, { label: "제1수장고", value: `${fmt(st.storage1.total)}점`, sub: `${fmt(s.storage1.species)} 기원종`, accent: "#2d9c63" }),
+      /*#__PURE__*/React.createElement(StatCard, { label: "제3수장고", value: `${fmt(st.storage3.total)}점`, sub: `${fmt(s.storage3.species)} 기원종`, accent: "#1a4a7a" })
+    ),
+    /*#__PURE__*/React.createElement("div", {
+      style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }
+    },
+      /*#__PURE__*/React.createElement(Section, { title: "표본 공정서 등재율" },
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 18 } },
+          /*#__PURE__*/React.createElement(DonutChart, { segments: [{ pct: specimenPharmView.bothPct, color: "#1a6b3e" }, { pct: 100 - specimenPharmView.bothPct, color: "#e8eded" }] }),
+          /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+            /*#__PURE__*/React.createElement(LegendItem, { color: "#1a6b3e", label: "공정서 등재", value: `${fmt(specimenPharmView.both)}점 (${specimenPharmView.bothPct}%)` }),
+            /*#__PURE__*/React.createElement(LegendItem, { color: "#4bbf84", label: "KP", value: `${fmt(specimenPharmView.kp)}점` }),
+            /*#__PURE__*/React.createElement(LegendItem, { color: "#78d4a4", label: "KHP", value: `${fmt(specimenPharmView.khp)}점` }),
+            /*#__PURE__*/React.createElement(LegendItem, { color: "#e8eded", label: "미등재", value: `${fmt(specimenPharmView.none)}점`, border: true })
+          )
+        )
+      ),
+      /*#__PURE__*/React.createElement(Section, { title: "식물종 공정서 등재율" },
+        /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 18 } },
+          /*#__PURE__*/React.createElement(DonutChart, { segments: [{ pct: speciesPharmView.bothPct, color: "#2563a6" }, { pct: 100 - speciesPharmView.bothPct, color: "#e8eded" }] }),
+          /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+            /*#__PURE__*/React.createElement(LegendItem, { color: "#2563a6", label: "공정서 등재", value: `${fmt(speciesPharmView.both)}종 (${speciesPharmView.bothPct}%)` }),
+            /*#__PURE__*/React.createElement(LegendItem, { color: "#3d87cf", label: "KP", value: `${fmt(speciesPharmView.kp)}종` }),
+            /*#__PURE__*/React.createElement(LegendItem, { color: "#6aaae0", label: "KHP", value: `${fmt(speciesPharmView.khp)}종` }),
+            /*#__PURE__*/React.createElement(LegendItem, { color: "#e8eded", label: "미등재", value: `${fmt(speciesPharmView.none)}종`, border: true })
+          )
+        )
+      )
+    ),
+    (() => {
+      // 수장고별 비교는 실제 통계(st.storage1/st.storage3)에서 가져오며, 포함/제외 토글에 맞춰
+      // kp/khp/both/none 또는 그 제외(Excl) 버전을 사용한다. (예전에는 이 부분이 목업 숫자로
+      // 고정되어 있었다.)
+      const rows = [{
+        title: "제1수장고", data: st.storage1, color: "#1a6b3e"
+      }, {
+        title: "제3수장고", data: st.storage3, color: "#1a4a7a"
+      }].map(x => ({
+        title: x.title,
+        color: x.color,
+        total: x.data.total,
+        kp: incl ? x.data.kp : x.data.kpExcl,
+        khp: incl ? x.data.khp : x.data.khpExcl,
+        both: incl ? x.data.both : x.data.bothExcl,
+        none: incl ? x.data.none : x.data.noneExcl
+      }));
+      return /*#__PURE__*/React.createElement(Section, { title: "수장고별 표본 공정서 등재율 비교" },
+        /*#__PURE__*/React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 } },
+          rows.map(x => /*#__PURE__*/React.createElement("div", {
+            key: x.title,
+            style: { background: "#f8fafb", borderRadius: 10, padding: 14, borderLeft: `4px solid ${x.color}` }
+          },
+            /*#__PURE__*/React.createElement("div", { style: { fontWeight: 700, color: x.color, marginBottom: 10, fontSize: 14 } }, x.title),
+            /*#__PURE__*/React.createElement(BarRow, { label: "공정서 등재", count: x.both, max: x.total, total: x.total, color: x.color }),
+            /*#__PURE__*/React.createElement(BarRow, { label: "KP 등재", count: x.kp, max: x.total, total: x.total, color: x.color + "99" }),
+            /*#__PURE__*/React.createElement(BarRow, { label: "KHP 등재", count: x.khp, max: x.total, total: x.total, color: x.color + "66" }),
+            /*#__PURE__*/React.createElement(BarRow, { label: "미등재", count: x.none, max: x.total, total: x.total, color: "#bdc3c7" })
+          ))
+        ),
+        /*#__PURE__*/React.createElement("p", { style: { fontSize: 11, color: "#95a5a6", marginTop: 10 } }, `* ${incl ? "동속 근연 포함" : "동속 근연 제외"} 기준`)
+      );
+    })()
+  );
+
+  const storageDetail = (tab === "s1" || tab === "s3") && (() => {
+    const data = tab === "s1" ? st.storage1 : st.storage3; // 표본 단위(개체) 통계 + 과/중요도 분포
+    const sSummary = tab === "s1" ? s.storage1 : s.storage3; // 식물종(국명) 단위 통계
     const color = tab === "s1" ? "#1a6b3e" : "#1a4a7a";
+    const kp = incl ? data.kp : data.kpExcl;
+    const khp = incl ? data.khp : data.khpExcl;
+    const both = incl ? data.both : data.bothExcl;
+    const none = incl ? data.none : data.noneExcl;
+    const sKp = incl ? sSummary.kp : sSummary.kpExcl;
+    const sKhp = incl ? sSummary.khp : sSummary.khpExcl;
+    const sBoth = incl ? sSummary.both : sSummary.bothExcl;
+    const sNone = incl ? sSummary.none : sSummary.noneExcl;
+    const sBothPct = incl ? sSummary.bothPct : sSummary.bothPctExcl;
     const maxFam = Math.max(...data.topFamilies.map(f => f.count));
     const maxImp = Math.max(...data.importance.map(i => i.count));
     const impColors = ["#0f3d22", "#1a6b3e", "#2d9c63", "#4bbf84", "#78d4a4", "#a8e6c2", "#c8f0d8"];
-    return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))",
-        gap: 12,
-        marginBottom: 20
-      }
-    }, /*#__PURE__*/React.createElement(StatCard, {
-      label: "전체 표본",
-      value: fmt(data.total) + "점",
-      accent: color
-    }), /*#__PURE__*/React.createElement(StatCard, {
-      label: "수장 기원종",
-      value: fmt(data.species) + "종",
-      accent: color
-    }), /*#__PURE__*/React.createElement(StatCard, {
-      label: "KP 등재 표본",
-      value: fmt(data.kp) + "점",
-      sub: pct(data.kp, data.total),
-      accent: color
-    }), /*#__PURE__*/React.createElement(StatCard, {
-      label: "KHP 등재 표본",
-      value: fmt(data.khp) + "점",
-      sub: pct(data.khp, data.total),
-      accent: color
-    })), /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: 18
-      }
-    }, /*#__PURE__*/React.createElement(Section, {
-      title: "과(Family)별 표본 분포 TOP 15"
-    }, data.topFamilies.map((f, i) => /*#__PURE__*/React.createElement(BarRow, {
-      key: i,
-      label: f.name,
-      count: f.count,
-      max: maxFam,
-      total: data.total,
-      color: `hsl(${color === "#1a6b3e" ? 140 : 210},${65 - i * 2}%,${38 + i * 2}%)`
-    }))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Section, {
-      title: "중요도별 표본 현황"
-    }, data.importance.map((imp, i) => /*#__PURE__*/React.createElement("div", {
-      key: i,
-      style: {
-        marginBottom: 9
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        display: "flex",
-        justifyContent: "space-between",
-        fontSize: 12,
-        marginBottom: 2
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        display: "flex",
-        gap: 7,
-        alignItems: "center"
-      }
-    }, /*#__PURE__*/React.createElement("span", {
-      style: {
-        display: "inline-block",
-        width: 30,
-        background: impColors[i],
-        color: "#fff",
-        borderRadius: 4,
-        fontSize: 10,
-        fontWeight: 700,
-        textAlign: "center",
-        padding: "1px 0"
-      }
-    }, imp.grade), /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: "#4a5568",
-        fontSize: 11
-      }
-    }, imp.label)), /*#__PURE__*/React.createElement("span", {
-      style: {
-        color: "#7f8c8d",
-        fontSize: 11
-      }
-    }, fmt(imp.count), " (", pct(imp.count, data.total), ")")), /*#__PURE__*/React.createElement("div", {
-      style: {
-        background: "#eef2f5",
-        borderRadius: 4,
-        height: 6
-      }
-    }, /*#__PURE__*/React.createElement("div", {
-      style: {
-        width: pct(imp.count, maxImp),
-        height: "100%",
-        background: impColors[i],
-        borderRadius: 4
-      }
-    }))))))));
-  })());
+    return /*#__PURE__*/React.createElement("div", null,
+      /*#__PURE__*/React.createElement("div", {
+        style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginBottom: 20 }
+      },
+        /*#__PURE__*/React.createElement(StatCard, { label: "전체 표본", value: fmt(data.total) + "점", accent: color }),
+        /*#__PURE__*/React.createElement(StatCard, { label: "수장 기원종", value: fmt(data.species) + "종", accent: color }),
+        /*#__PURE__*/React.createElement(StatCard, { label: "KP 등재 표본", value: fmt(kp) + "점", sub: pct(kp, data.total), accent: color }),
+        /*#__PURE__*/React.createElement(StatCard, { label: "KHP 등재 표본", value: fmt(khp) + "점", sub: pct(khp, data.total), accent: color })
+      ),
+      /*#__PURE__*/React.createElement("div", {
+        style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }
+      },
+        /*#__PURE__*/React.createElement(Section, { title: "표본 공정서 등재율" },
+          /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 18 } },
+            /*#__PURE__*/React.createElement(DonutChart, { segments: [{ pct: pctOf(both, data.total), color }, { pct: 100 - pctOf(both, data.total), color: "#e8eded" }] }),
+            /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+              /*#__PURE__*/React.createElement(LegendItem, { color, label: "공정서 등재", value: `${fmt(both)}점 (${pct(both, data.total)})` }),
+              /*#__PURE__*/React.createElement(LegendItem, { color: color + "99", label: "KP", value: `${fmt(kp)}점` }),
+              /*#__PURE__*/React.createElement(LegendItem, { color: color + "66", label: "KHP", value: `${fmt(khp)}점` }),
+              /*#__PURE__*/React.createElement(LegendItem, { color: "#e8eded", label: "미등재", value: `${fmt(none)}점`, border: true })
+            )
+          )
+        ),
+        /*#__PURE__*/React.createElement(Section, { title: "식물종 공정서 등재율" },
+          /*#__PURE__*/React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 18 } },
+            /*#__PURE__*/React.createElement(DonutChart, { segments: [{ pct: sBothPct, color: "#2563a6" }, { pct: 100 - sBothPct, color: "#e8eded" }] }),
+            /*#__PURE__*/React.createElement("div", { style: { flex: 1 } },
+              /*#__PURE__*/React.createElement(LegendItem, { color: "#2563a6", label: "공정서 등재", value: `${fmt(sBoth)}종 (${sBothPct}%)` }),
+              /*#__PURE__*/React.createElement(LegendItem, { color: "#3d87cf", label: "KP", value: `${fmt(sKp)}종` }),
+              /*#__PURE__*/React.createElement(LegendItem, { color: "#6aaae0", label: "KHP", value: `${fmt(sKhp)}종` }),
+              /*#__PURE__*/React.createElement(LegendItem, { color: "#e8eded", label: "미등재", value: `${fmt(sNone)}종`, border: true })
+            )
+          )
+        )
+      ),
+      /*#__PURE__*/React.createElement("p", { style: { fontSize: 11, color: "#95a5a6", marginTop: -8, marginBottom: 18 } }, `* ${incl ? "동속 근연 포함" : "동속 근연 제외"} 기준`),
+      /*#__PURE__*/React.createElement("div", {
+        style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }
+      },
+        /*#__PURE__*/React.createElement(Section, { title: "과(Family)별 표본 분포 TOP 15" },
+          data.topFamilies.map((f, i) => /*#__PURE__*/React.createElement(BarRow, {
+            key: i,
+            label: f.name,
+            count: f.count,
+            max: maxFam,
+            total: data.total,
+            color: `hsl(${color === "#1a6b3e" ? 140 : 210},${65 - i * 2}%,${38 + i * 2}%)`
+          }))
+        ),
+        /*#__PURE__*/React.createElement("div", null,
+          /*#__PURE__*/React.createElement(Section, { title: "중요도별 표본 현황" },
+            data.importance.map((imp, i) => /*#__PURE__*/React.createElement("div", { key: i, style: { marginBottom: 9 } },
+              /*#__PURE__*/React.createElement("div", { style: { display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 2 } },
+                /*#__PURE__*/React.createElement("span", { style: { display: "flex", gap: 7, alignItems: "center" } },
+                  /*#__PURE__*/React.createElement("span", {
+                    style: { display: "inline-block", width: 30, background: impColors[i], color: "#fff", borderRadius: 4, fontSize: 10, fontWeight: 700, textAlign: "center", padding: "1px 0" }
+                  }, imp.grade),
+                  /*#__PURE__*/React.createElement("span", { style: { color: "#4a5568", fontSize: 11 } }, imp.label)
+                ),
+                /*#__PURE__*/React.createElement("span", { style: { color: "#7f8c8d", fontSize: 11 } }, fmt(imp.count), " (", pct(imp.count, data.total), ")")
+              ),
+              /*#__PURE__*/React.createElement("div", { style: { background: "#eef2f5", borderRadius: 4, height: 6 } },
+                /*#__PURE__*/React.createElement("div", { style: { width: pct(imp.count, maxImp), height: "100%", background: impColors[i], borderRadius: 4 } })
+              )
+            ))
+          )
+        )
+      )
+    );
+  })();
+
+  return /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement(SectionHeader, {
+      title: "제주센터 표본 현황 통계",
+      sub: `국립생약자원관 제주 센터 수장 표본 현황 — 총 ${fmt(s.specimens.total)}점`,
+      color: "#1a6b3e"
+    }),
+    tabButtons,
+    modeToggle,
+    overviewSection,
+    storageDetail
+  );
 }
 
 // ─── 식물종 정보 페이지 ──────────────────────────────────────────────────────
@@ -11062,10 +11121,11 @@ function SpeciesModal({
 }) {
   const pharmaColor = s.pharma === "KP" ? "#1a4a7a" : s.pharma === "KHP" ? "#1a6b3e" : s.pharma === "KP, KHP" ? "#7a3d1a" : "#7f8c8d";
   const pharmaBg = s.pharma === "KP" ? "#e6f1fb" : s.pharma === "KHP" ? "#e8f5ee" : s.pharma === "KP, KHP" ? "#faeeda" : "#f4f8f4";
+  const [selectedSpec, setSelectedSpec] = useState(null); // 목록에서 클릭한 개별 표본(상세 보기용)
 
   // 표본 목록: __SPEC__에서 학명 매칭
   const specList = (window.__SPEC__ || []).filter(sp => sp[6] && sp[6].trim() === (s.sciName || "").trim()).slice(0, 50);
-  return /*#__PURE__*/React.createElement(Modal, {
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Modal, {
     onClose: onClose
   }, /*#__PURE__*/React.createElement("div", {
     style: {
@@ -11199,13 +11259,18 @@ function SpeciesModal({
     const sb = stor === "1수장고" ? "#e8f5ee" : "#e6f1fb";
     return /*#__PURE__*/React.createElement("div", {
       key: id + i,
+      onClick: () => setSelectedSpec(sp),
       style: {
         padding: "9px 12px",
         borderRadius: 8,
         background: i % 2 === 0 ? "#f8fafb" : "#fff",
         border: "1px solid #eef2f5",
-        marginBottom: 6
-      }
+        marginBottom: 6,
+        cursor: "pointer",
+        transition: "background .12s"
+      },
+      onMouseEnter: e => e.currentTarget.style.background = "#eef6f0",
+      onMouseLeave: e => e.currentTarget.style.background = i % 2 === 0 ? "#f8fafb" : "#fff"
     }, /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
@@ -11244,7 +11309,13 @@ function SpeciesModal({
         borderRadius: 4,
         padding: "1px 5px"
       }
-    }, stor))), /*#__PURE__*/React.createElement("div", {
+    }, stor), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 13,
+        color: "#bdc3c7",
+        marginLeft: 2
+      }
+    }, "›"))), /*#__PURE__*/React.createElement("div", {
       style: {
         display: "flex",
         gap: 12,
@@ -11256,7 +11327,10 @@ function SpeciesModal({
         fontFamily: "monospace"
       }
     }, id), cd && /*#__PURE__*/React.createElement("span", null, cd)));
-  })));
+  }))), selectedSpec && /*#__PURE__*/React.createElement(SpecimenModal, {
+    spec: selectedSpec,
+    onClose: () => setSelectedSpec(null)
+  }));
 }
 
 // ─── 생약 위치 지도 페이지 ────────────────────────────────────────────────────
