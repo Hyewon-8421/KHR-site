@@ -126,12 +126,22 @@ function useSpecimenPhotos(id) {
 }
 
 // 표본 스캔 사진 갤러리 (보기 전용 / 편집 가능 모드 지원)
+// 첫 번째 사진을 큰 미리보기로 보여주고, 사진이 여러 장이면 그 아래에 작은 썸네일 목록을 두어
+// 다른 사진을 클릭하면 미리보기가 바뀌도록 한다. 기존의 "사진을 클릭하면 더 크게 보기(라이트박스)"
+// 기능은 미리보기 이미지를 클릭했을 때 그대로 동작한다.
 function SpecimenPhotoGallery({ id, editable }) {
   const { photos, loading, error, upload, remove } = useSpecimenPhotos(id);
   const [uploading, setUploading] = useState(false);
   const [uploadErr, setUploadErr] = useState(null);
   const [lightbox, setLightbox] = useState(null);
+  const [activeIdx, setActiveIdx] = useState(0); // 현재 큰 미리보기로 보여줄 사진의 인덱스
   const fileRef = useRef(null);
+
+  // 사진 목록이 바뀌면(새로 불러오거나 삭제해서 개수가 줄어들면) 미리보기 인덱스가
+  // 범위를 벗어나지 않도록 첫 번째 사진으로 되돌린다.
+  useEffect(() => {
+    if (activeIdx >= photos.length) setActiveIdx(0);
+  }, [photos.length]);
 
   const handleFiles = async files => {
     if (!files || files.length === 0) return;
@@ -154,6 +164,8 @@ function SpecimenPhotoGallery({ id, editable }) {
       alert("삭제 실패: " + e.message);
     }
   };
+
+  const activePhoto = photos[activeIdx] || null;
 
   return React.createElement("div", { style: { marginTop: 16 } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
@@ -178,24 +190,42 @@ function SpecimenPhotoGallery({ id, editable }) {
     !loading && !error && photos.length === 0 && React.createElement("div", {
       style: { fontSize: 12, color: "#bdc3c7", padding: "14px 0", textAlign: "center", background: "#fafcfa", borderRadius: 8, border: "1px dashed #e0e8e2" }
     }, "등록된 이미지 없음"),
-    photos.length > 0 && React.createElement("div", {
-      style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(88px,1fr))", gap: 8 }
-    }, photos.map(p => React.createElement("div", {
+    photos.length > 0 && activePhoto && React.createElement("div", {
+      style: { position: "relative", borderRadius: 10, overflow: "hidden", border: "1px solid #eef2f5", background: "#f4f8f5", marginBottom: photos.length > 1 ? 8 : 0 }
+    },
+      React.createElement("img", {
+        src: activePhoto.url,
+        alt: activePhoto.name,
+        onClick: () => setLightbox(activePhoto.url),
+        style: { width: "100%", maxHeight: 360, objectFit: "contain", display: "block", cursor: "zoom-in" }
+      }),
+      editable && React.createElement("button", {
+        onClick: e => { e.stopPropagation(); handleRemove(activePhoto.name); },
+        title: "사진 삭제",
+        style: { position: "absolute", top: 6, right: 6, width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 13, cursor: "pointer", lineHeight: "24px", padding: 0 }
+      }, "✕")
+    ),
+    photos.length > 1 && React.createElement("div", {
+      style: { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(52px,1fr))", gap: 6 }
+    }, photos.map((p, i) => React.createElement("div", {
       key: p.name,
-      style: { position: "relative", borderRadius: 8, overflow: "hidden", border: "1px solid #eef2f5", aspectRatio: "1" }
+      onClick: () => setActiveIdx(i),
+      title: "클릭하면 이 사진을 크게 봅니다",
+      style: {
+        borderRadius: 6,
+        overflow: "hidden",
+        aspectRatio: "1",
+        cursor: "pointer",
+        border: i === activeIdx ? "2px solid #1a6b3e" : "1px solid #eef2f5",
+        opacity: i === activeIdx ? 1 : 0.85
+      }
     },
       React.createElement("img", {
         src: p.url,
         alt: p.name,
         loading: "lazy",
-        onClick: () => setLightbox(p.url),
-        style: { width: "100%", height: "100%", objectFit: "cover", display: "block", cursor: "zoom-in" }
-      }),
-      editable && React.createElement("button", {
-        onClick: e => { e.stopPropagation(); handleRemove(p.name); },
-        title: "사진 삭제",
-        style: { position: "absolute", top: 3, right: 3, width: 20, height: 20, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 12, cursor: "pointer", lineHeight: "20px", padding: 0 }
-      }, "✕")
+        style: { width: "100%", height: "100%", objectFit: "cover", display: "block" }
+      })
     ))),
     lightbox && React.createElement("div", {
       onClick: () => setLightbox(null),
@@ -8740,7 +8770,7 @@ function SpecimenModal({
         })
   );
 
-  return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: editMode ? 680 : 920 },
+  return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: editMode ? 680 : 960 },
     React.createElement("div", { style: { padding: "22px 24px 0" } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 } },
         React.createElement("div", null,
@@ -8835,7 +8865,7 @@ function SpecimenModal({
                 );
               })(),
             ),
-            React.createElement("div", { style: { flex: "1 1 260px", minWidth: 240, maxWidth: 340 } },
+            React.createElement("div", { style: { flex: "1 1 300px", minWidth: 260, maxWidth: 380 } },
               React.createElement(SpecimenPhotoGallery, { id, editable: false })
             ),
           ),
@@ -8897,6 +8927,7 @@ function PharmaSearchPage({
       return heldFilter === "보유" ? held : !held;
     });
   };
+  const families = ["전체", ...Array.from(new Set(PHARMA_DATA.map(d => d.family?.split("/")[0]).filter(Boolean))).sort()];
   const parts = ["전체", ...Array.from(new Set(PHARMA_DATA.map(d => d.part).filter(Boolean))).sort()];
   const filtered = PHARMA_DATA.filter(d => {
     if (typeFilter !== "전체" && d.type !== typeFilter) return false;
@@ -9152,11 +9183,11 @@ function SpecimenSearchPage({
     URL.revokeObjectURL(url);
   };
 
-  // ── 엑셀 다운로드 (전체 표본, Supabase에서 로드된 전체 데이터) ──────────────────────────
+  // ── 엑셀 다운로드 (검색·필터로 조회된 표본만) ──────────────────────────
   const exportToExcel = () => {
-    const data = extraSpec || [];
+    const data = filtered || [];
     if (data.length === 0) {
-      alert("다운로드할 표본이 없습니다. 데이터베이스 연결 상태를 확인해주세요.");
+      alert("다운로드할 표본이 없습니다. 검색·필터 조건을 확인해주세요.");
       return;
     }
     const COLS = ["관리번호","표본번호","수장고","수장위치","생약명","국명","학명","수집날짜","수집장소","중요도","속명","과명","GPS","공정서","과제명"];
@@ -9164,7 +9195,7 @@ function SpecimenSearchPage({
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "제주센터 표본");
-    XLSX.writeFile(wb, "제주센터_전체표본_" + new Date().toISOString().slice(0,10) + ".xlsx");
+    XLSX.writeFile(wb, "제주센터_조회표본_" + new Date().toISOString().slice(0,10) + ".xlsx");
   };
 
   // ── 엑셀 업로드 → 파싱 → DB 저장 ──────────────────────────
@@ -9404,7 +9435,7 @@ function SpecimenSearchPage({
       fontSize: 12.5,
       fontWeight: 600
     }
-  }, "⬇ 전체 표본 다운로드"),
+  }, "⬇ 조회된 표본 목록 다운로드"),
   /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setShowUpload(!showUpload);
@@ -10985,19 +11016,17 @@ function SpeciesPage({
   const pharmaLabel = p => p === "미등재" ? "—" : p;
   const pharmaColor = p => p === "KP" ? "#1a4a7a" : p === "KHP" ? "#1a6b3e" : p === "KP, KHP" ? "#7a3d1a" : "#bdc3c7";
   const pharmaBg = p => p === "KP" ? "#e6f1fb" : p === "KHP" ? "#e8f5ee" : p === "KP, KHP" ? "#faeeda" : "transparent";
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "flex-start",
-      gap: 12,
-      flexWrap: "wrap"
-    }
-  }, /*#__PURE__*/React.createElement(SectionHeader, {
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SectionHeader, {
     title: "식물종 정보",
     sub: "수집 표본의 식물종(기원종) 목록 — 공정서 등재 여부, 생약명, 학명 조회",
     color: "#1a2e1a"
-  }), /*#__PURE__*/React.createElement("button", {
+  }), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "flex-end",
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowSynonyms(true),
     style: {
       padding: "9px 16px",
