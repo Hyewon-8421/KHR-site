@@ -8328,6 +8328,30 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
 window.__STATS__ = computeStatsFromSpecimens([], window.__PHARMA__, []); // 표본 로딩 전 기본값(0으로 채워진 형태) 확보
 ;
 const fmt = n => n?.toLocaleString("ko-KR");
+
+// ── 수집날짜 표시 보정 ────────────────────────────────────────────
+// 엑셀에서 "날짜" 형식이 아닌 셀로 인식되면(혹은 업로드 경로에 따라)
+// 실제 날짜 대신 엑셀 내부 일련번호(예: 44561)가 그대로 DB에 저장되는
+// 경우가 있었다. 이 값은 "YYYY-MM-DD" 형태의 문자열이 아니라 순수 숫자로만
+// 이루어져 있으므로, 화면에 표시할 때만 실제 날짜로 변환해 보여준다.
+// (DB에 저장된 원본 값 자체는 건드리지 않는다 — 표시 전용 보정)
+function formatCollectDate(v) {
+  if (!v) return v;
+  const s = String(v).trim();
+  if (/^\d{4,6}$/.test(s)) {
+    const serial = parseInt(s, 10);
+    // 엑셀(1900 날짜 체계) 일련번호 → JS Date 변환 (SheetJS 등에서 쓰는 표준 공식)
+    const ms = Math.round((serial - 25569) * 86400 * 1000);
+    const d = new Date(ms);
+    if (!isNaN(d.getTime()) && d.getFullYear() > 1950 && d.getFullYear() < 2100) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+  }
+  return s;
+}
 const pct = (n, t) => (n / t * 100).toFixed(1) + "%";
 
 
@@ -8765,7 +8789,7 @@ function SpecimenModal({
               React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
                 React.createElement("tbody", null,
                   [["관리번호", id], ["표본번호", specNo], ["수장고", storage], ["수장위치", location],
-                   ["수집날짜", collectDate], ["수집장소", collectPlace], ["수집 과제", project], ["GPS 좌표", gps]]
+                   ["수집날짜", formatCollectDate(collectDate)], ["수집장소", collectPlace], ["수집 과제", project], ["GPS 좌표", gps]]
                     .filter(([, v]) => v)
                     .map(([k, v]) => React.createElement("tr", { key: k },
                       React.createElement("td", { style: { padding: "7px 0", color: "#7f8c8d", fontSize: 13, whiteSpace: "nowrap", paddingRight: 20, verticalAlign: "top", minWidth: 80 } }, k),
@@ -10080,7 +10104,9 @@ function LegendItem({
 
 // ─── 홈 페이지 ───────────────────────────────────────────────────────────────
 function HomePage({
-  onNav
+  onNav,
+  specimensLoading,
+  specimensProgress
 }) {
   const s = window.__STATS__.summary;
   const st = window.__STATS__;
@@ -10117,7 +10143,19 @@ function HomePage({
       fontSize: 13,
       lineHeight: 1.6
     }
-  }, "국립생약자원관 제주 센터 수장·관리 생약자원 표본 및 공정서 등재 현황")), /*#__PURE__*/React.createElement("div", {
+  }, "국립생약자원관 제주 센터 수장·관리 생약자원 표본 및 공정서 등재 현황"), specimensLoading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 14,
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 8,
+      background: "rgba(255,255,255,0.15)",
+      borderRadius: 20,
+      padding: "6px 14px",
+      fontSize: 12,
+      fontWeight: 700
+    }
+  }, "⏳ 표본 데이터 불러오는 중", specimensProgress?.total ? ` (${fmt(specimensProgress.loaded)} / ${fmt(specimensProgress.total)}건)` : "", " · 완료되면 아래 수치가 자동으로 갱신됩니다")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit,minmax(155px,1fr))",
@@ -11936,7 +11974,7 @@ function MapPage({ specimens: specimensProp, specimensLoading, specimensError })
         fontSize: 10,
         color: "#bdc3c7"
       }
-    }, /*#__PURE__*/React.createElement("span", null, family), importance && /*#__PURE__*/React.createElement("span", null, "등급 ", importance), collectDate && /*#__PURE__*/React.createElement("span", null, collectDate)));
+    }, /*#__PURE__*/React.createElement("span", null, family), importance && /*#__PURE__*/React.createElement("span", null, "등급 ", importance), collectDate && /*#__PURE__*/React.createElement("span", null, formatCollectDate(collectDate))));
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       padding: "10px 14px",
@@ -12220,6 +12258,7 @@ function App() {
   const [allSpecimens, setAllSpecimens] = useState(null); // DB에서 불러온 전체 표본
   const [specimensLoading, setSpecimensLoading] = useState(false); // DB 로딩 중
   const [specimensError, setSpecimensError] = useState(null); // DB 오류
+  const [specimensProgress, setSpecimensProgress] = useState({ loaded: 0, total: 0 }); // 로딩 진행률(불러온 건수/전체 건수)
   const [synonyms, setSynonyms] = useState([]); // 이명 매핑: [[표본국명, 공정서국명], ...]
   const loadSynonyms = useCallback(async () => {
     try {
@@ -12233,6 +12272,7 @@ function App() {
   const loadAllSpecimens = useCallback(async () => {
     setSpecimensLoading(true);
     setSpecimensError(null);
+    setSpecimensProgress({ loaded: 0, total: 0 });
     try {
       // 응답 payload 크기 제한(Netlify Functions ~6MB) 때문에
       // 전체 데이터를 한 번에 받지 않고 페이지 단위(offset/limit)로 나눠서 불러온 뒤 합칩니다.
@@ -12244,6 +12284,8 @@ function App() {
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || "불러오기 실패");
         all = all.concat(json.data || []);
+        // 페이지를 하나 불러올 때마다 진행률 갱신 (전체 건수는 첫 응답의 total로 파악)
+        setSpecimensProgress({ loaded: all.length, total: json.total || all.length });
         if (!json.hasMore) break;
         offset += PAGE;
       }
@@ -12285,6 +12327,7 @@ function App() {
     setPage(id);
     setNavParams(params || null);
   };
+  const specimensProgressPct = specimensProgress.total > 0 ? Math.min(100, Math.round(specimensProgress.loaded / specimensProgress.total * 100)) : 0;
   const navItems = [{
     id: "home",
     label: "총괄"
@@ -12388,14 +12431,56 @@ function App() {
       transition: "all 0.2s",
       whiteSpace: "nowrap"
     }
-  }, n.label))))), /*#__PURE__*/React.createElement("main", {
+  }, n.label))))), specimensLoading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      position: "sticky",
+      top: 0,
+      zIndex: 190,
+      background: "#eef7f0",
+      borderBottom: "1px solid #cfe6d8",
+      padding: "8px 20px",
+      boxShadow: "0 2px 8px rgba(0,0,0,0.06)"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 1100,
+      margin: "0 auto"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 6,
+      fontSize: 12,
+      color: "#0f3d22",
+      fontWeight: 700
+    }
+  }, /*#__PURE__*/React.createElement("span", null, "🌿 Supabase에서 표본 데이터를 불러오는 중입니다..."), /*#__PURE__*/React.createElement("span", null, `${fmt(specimensProgress.loaded)}${specimensProgress.total ? ` / ${fmt(specimensProgress.total)}` : ""}건${specimensProgressPct ? ` (${specimensProgressPct}%)` : ""}`)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: 6,
+      background: "#d7ead9",
+      borderRadius: 4,
+      overflow: "hidden"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      height: "100%",
+      width: `${specimensProgressPct || 8}%`,
+      background: "linear-gradient(90deg,#1a6b3e,#2d9c63)",
+      transition: "width 0.3s ease",
+      borderRadius: 4
+    }
+  })))), /*#__PURE__*/React.createElement("main", {
     style: {
       maxWidth: 1100,
       margin: "0 auto",
       padding: "24px 18px 60px"
     }
   }, page === "home" && /*#__PURE__*/React.createElement(HomePage, {
-    onNav: nav
+    onNav: nav,
+    specimensLoading: specimensLoading,
+    specimensProgress: specimensProgress
   }), page === "pharma-search" && /*#__PURE__*/React.createElement(PharmaSearchPage, null), page === "specimen-search" && /*#__PURE__*/React.createElement(SpecimenSearchPage, {
     navParams: navParams,
     extraSpec: allSpecimens,
