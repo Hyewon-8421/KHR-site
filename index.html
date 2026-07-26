@@ -8835,12 +8835,15 @@ function Badge({
 }
 
 // ─── 공정서 생약 페이지 ────────────────────────────────────────────────────────
-function PharmaSearchPage() {
+function PharmaSearchPage({
+  navParams
+}) {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("전체");
   const [familyFilter, setFamilyFilter] = useState("전체");
   const [partFilter, setPartFilter] = useState("전체");
-  const [heldFilter, setHeldFilter] = useState("전체"); // 전체 | 보유 | 미보유 (제주센터 표본 보유 여부)
+  // 대시보드의 "공정서 기원종 보유율" 그래프에서 보유/미보유를 클릭해 들어온 경우 그 값을 초기 필터로 사용
+  const [heldFilter, setHeldFilter] = useState(navParams?.heldFilter || "전체"); // 전체 | 보유 | 미보유 (제주센터 표본 보유 여부)
   const [selectedDrug, setSelectedDrug] = useState(null);
   const [selectedOrigin, setSelectedOrigin] = useState(null); // "보유" 배지를 클릭한 기원종(표본 목록 보기용)
   const [page, setPage] = useState(1);
@@ -10062,16 +10065,20 @@ function LegendItem({
   color,
   label,
   value,
-  border
+  border,
+  onClick
 }) {
   return /*#__PURE__*/React.createElement("div", {
+    onClick: onClick,
     style: {
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
       marginBottom: 7,
       paddingBottom: 7,
-      borderBottom: border ? "none" : "1px solid #f0f4f2"
+      borderBottom: border ? "none" : "1px solid #f0f4f2",
+      cursor: onClick ? "pointer" : "default",
+      borderRadius: onClick ? 6 : 0
     }
   }, /*#__PURE__*/React.createElement("span", {
     style: {
@@ -10331,12 +10338,14 @@ function HomePage({
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e67e22",
     label: "보유",
-    value: `${fmt(s.originCoverage.covered)}종 (${s.originCoverage.coveredPct}%)`
+    value: `${fmt(s.originCoverage.covered)}종 (${s.originCoverage.coveredPct}%)`,
+    onClick: () => onNav("pharma-search", { heldFilter: "보유" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미보유",
     value: `${fmt(s.originCoverage.notCovered)}종 (${(100 - s.originCoverage.coveredPct).toFixed(1)}%)`,
-    border: true
+    border: true,
+    onClick: () => onNav("pharma-search", { heldFilter: "미보유" })
   }), /*#__PURE__*/React.createElement("p", {
     style: {
       fontSize: 11,
@@ -12313,12 +12322,22 @@ function App() {
   // 지도와 실제 표본 데이터의 연결이 끊긴 상태였다.
   // Supabase에서 전체 표본을 불러올 때마다 window.__SPEC__도 함께 갱신해
   // 지도/식물종 페이지가 실제 데이터를 다시 참조하도록 한다.
+  //
+  // ⚠️ window.__STATS__는 일반 전역 변수라서, 여기서 값을 새로 채워 넣어도
+  // React는 "상태가 바뀌었다"는 사실을 알지 못해 화면을 다시 그리지 않는다.
+  // 그래서 예전에는 표본 로딩이 끝나 통계가 새로 계산돼도 대시보드가 즉시
+  // 갱신되지 않고, 다른 페이지로 이동했다가 돌아와 컴포넌트가 다시 마운트될
+  // 때에만 최신 값이 보였다. statsVersion을 함께 올려 App(및 그 하위 페이지)이
+  // 강제로 리렌더링되도록 해서, 대시보드가 열려 있는 동안에도 로딩이 끝나는
+  // 즉시 자동으로 수치가 갱신되게 한다.
+  const [statsVersion, setStatsVersion] = useState(0);
   useEffect(() => {
     if (allSpecimens) {
       window.__SPEC__ = allSpecimens;
       window.__SPECIES__ = computeSpeciesFromSpecimens(allSpecimens, window.__PHARMA__);
       window.__SYNONYMS__ = synonyms;
       window.__STATS__ = computeStatsFromSpecimens(allSpecimens, window.__PHARMA__, synonyms);
+      setStatsVersion(v => v + 1);
     }
   }, [allSpecimens, synonyms]);
 
@@ -12481,7 +12500,9 @@ function App() {
     onNav: nav,
     specimensLoading: specimensLoading,
     specimensProgress: specimensProgress
-  }), page === "pharma-search" && /*#__PURE__*/React.createElement(PharmaSearchPage, null), page === "specimen-search" && /*#__PURE__*/React.createElement(SpecimenSearchPage, {
+  }), page === "pharma-search" && /*#__PURE__*/React.createElement(PharmaSearchPage, {
+    navParams: navParams
+  }), page === "specimen-search" && /*#__PURE__*/React.createElement(SpecimenSearchPage, {
     navParams: navParams,
     extraSpec: allSpecimens,
     setExtraSpec: setAllSpecimens,
