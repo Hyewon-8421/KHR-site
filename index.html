@@ -10086,7 +10086,8 @@ function BarRow({
 }
 function DonutChart({
   segments,
-  size = 130
+  size = 130,
+  centerLabel = "공정서 등재"
 }) {
   const r = 50,
     cx = 70,
@@ -10141,7 +10142,7 @@ function DonutChart({
     textAnchor: "middle",
     fontSize: "9",
     fill: "#7f8c8d"
-  }, "공정서 등재"));
+  }, centerLabel));
 }
 function LegendItem({
   color,
@@ -10406,6 +10407,7 @@ function HomePage({
       flexWrap: "wrap"
     }
   }, /*#__PURE__*/React.createElement(DonutChart, {
+    centerLabel: "공정서 기원종",
     segments: [{
       pct: s.originCoverage.coveredPct,
       color: "#e67e22"
@@ -10428,13 +10430,7 @@ function HomePage({
     value: `${fmt(s.originCoverage.notCovered)}종 (${(100 - s.originCoverage.coveredPct).toFixed(1)}%)`,
     border: true,
     onClick: () => onNav("pharma-search", { heldFilter: "미보유" })
-  }), /*#__PURE__*/React.createElement("p", {
-    style: {
-      fontSize: 11,
-      color: "#95a5a6",
-      margin: "8px 0 0"
-    }
-  }, "* 동속 근연 미포함 기준")), /*#__PURE__*/React.createElement("div", {
+  })), /*#__PURE__*/React.createElement("div", {
     style: {
       flex: 1,
       fontSize: 13,
@@ -10710,6 +10706,7 @@ function PharmaStatsPage() {
       flexWrap: "wrap"
     }
   }, /*#__PURE__*/React.createElement(DonutChart, {
+    centerLabel: "공정서 기원종",
     segments: [{
       pct: window.__STATS__.summary.originCoverage.coveredPct,
       color: "#2563a6"
@@ -10731,13 +10728,7 @@ function PharmaStatsPage() {
     label: "미보유",
     value: `${fmt(window.__STATS__.summary.originCoverage.notCovered)}종 (${(100 - window.__STATS__.summary.originCoverage.coveredPct).toFixed(1)}%)`,
     border: true
-  }), /*#__PURE__*/React.createElement("p", {
-    style: {
-      fontSize: 11,
-      color: "#95a5a6",
-      marginTop: 8
-    }
-  }, "* 동속 근연 미포함 기준")))));
+  })))));
 }
 
 // ─── 표본 통계 페이지 ─────────────────────────────────────────────────────────
@@ -11547,7 +11538,8 @@ function MapPage({ specimens: specimensProp, specimensLoading, specimensError })
   const [markers, setMarkers] = useState(null);
   const [specimens, setSpecimens] = useState(null);
   const [selected, setSelected] = useState(null); // {place, specimens[]}
-  const [filter, setFilter] = useState("전체"); // 전체 | 공정서 | 1수장고 | 3수장고
+  const [storageFilter, setStorageFilter] = useState("전체"); // 전체 | 1수장고 | 3수장고
+  const [pharmaOnly, setPharmaOnly] = useState(false); // 공정서 등재분만 보기 — 수장고 필터와 동시에 켤 수 있음
   const [query, setQuery] = useState("");
   const [mapReady, setMapReady] = useState(false);
 
@@ -11633,15 +11625,16 @@ function MapPage({ specimens: specimensProp, specimensLoading, specimensError })
     markersLayerRef.current = clusterGroup;
     clusterGroup.addTo(mapRef.current);
     const filtered = markers.filter(m => {
-      if (filter === "1수장고") return specimens[m.ix[0]]?.[2] === "1수장고";
-      if (filter === "3수장고") return specimens[m.ix[0]]?.[2] === "3수장고";
-      if (filter === "공정서") return m.ix.some(i => specimens[i]?.[13]);
+      // 수장고 선택과 "공정서 등재만" 체크박스는 서로 배타적이지 않고 동시에 적용된다(AND 조건).
+      if (storageFilter !== "전체" && !m.ix.some(i => specimens[i]?.[2] === storageFilter)) return false;
+      if (pharmaOnly && !m.ix.some(i => specimens[i]?.[13])) return false;
       if (query) {
         const q = query.toLowerCase();
-        return m.p?.toLowerCase().includes(q) || m.ix.some(i => {
+        const matchesQuery = m.p?.toLowerCase().includes(q) || m.ix.some(i => {
           const s = specimens[i];
           return s?.[4]?.toLowerCase().includes(q) || s?.[5]?.toLowerCase().includes(q) || s?.[6]?.toLowerCase().includes(q);
         });
+        if (!matchesQuery) return false;
       }
       return true;
     });
@@ -11683,7 +11676,7 @@ function MapPage({ specimens: specimensProp, specimensLoading, specimensError })
       if (idx < filtered.length) requestAnimationFrame(addBatch);
     };
     requestAnimationFrame(addBatch);
-  }, [markers, specimens, filter, query]);
+  }, [markers, specimens, storageFilter, pharmaOnly, query]);
   const impColor = imp => {
     if (!imp) return "#95a5a6";
     if (imp.startsWith("A")) return "#0f3d22";
@@ -11748,9 +11741,9 @@ function MapPage({ specimens: specimensProp, specimensLoading, specimensError })
       color: "#95a5a6",
       fontSize: 15
     }
-  }, "✕")), ["전체", "공정서", "1수장고", "3수장고"].map(f => /*#__PURE__*/React.createElement("button", {
+  }, "✕")), ["전체", "1수장고", "3수장고"].map(f => /*#__PURE__*/React.createElement("button", {
     key: f,
-    onClick: () => setFilter(f),
+    onClick: () => setStorageFilter(f),
     style: {
       padding: "8px 14px",
       borderRadius: 18,
@@ -11759,10 +11752,30 @@ function MapPage({ specimens: specimensProp, specimensLoading, specimensError })
       fontWeight: 600,
       fontSize: 12,
       transition: "all 0.2s",
-      background: filter === f ? "#7a3d1a" : "#f4f0ec",
-      color: filter === f ? "#fff" : "#5a3a1a"
+      background: storageFilter === f ? "#7a3d1a" : "#f4f0ec",
+      color: storageFilter === f ? "#fff" : "#5a3a1a"
     }
-  }, f)), loadState === "idle" && (specimensProp ? /*#__PURE__*/React.createElement("button", {
+  }, f)), /*#__PURE__*/React.createElement("label", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 6,
+      padding: "8px 14px",
+      borderRadius: 18,
+      cursor: "pointer",
+      fontWeight: 600,
+      fontSize: 12,
+      transition: "all 0.2s",
+      background: pharmaOnly ? "#fdeee0" : "#f4f0ec",
+      color: pharmaOnly ? "#e67e22" : "#5a3a1a",
+      userSelect: "none"
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: pharmaOnly,
+    onChange: e => setPharmaOnly(e.target.checked),
+    style: { cursor: "pointer" }
+  }), "공정서 등재만"), loadState === "idle" && (specimensProp ? /*#__PURE__*/React.createElement("button", {
     onClick: loadData,
     style: {
       padding: "9px 20px",
