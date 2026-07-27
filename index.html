@@ -9147,7 +9147,7 @@ function SpecimenSearchPage({
   // 대시보드 카드 클릭 시 전달된 수장고 필터를 초기값으로 사용 (예: "제1수장고 표본" 카드 → "1수장고")
   const [storageFilter, setStorageFilter] = useState(navParams?.storage || "전체");
   const [familyFilter, setFamilyFilter] = useState("전체");
-  const [pharmaFilter, setPharmaFilter] = useState("전체");
+  const [pharmaFilter, setPharmaFilter] = useState(navParams?.pharma || "전체");
   const [selected, setSelected] = useState(null);
   const [page, setPage] = useState(1);
   const [uploadState, setUploadState] = useState("idle");
@@ -10219,7 +10219,7 @@ function HomePage({
       marginBottom: 6,
       textTransform: "uppercase"
     }
-  }, "Korea Herbal Resources Repository"), /*#__PURE__*/React.createElement("h1", {
+  }, "HERBARIUM OF KOREA HERBAL MEDICINE RESOURCES"), /*#__PURE__*/React.createElement("h1", {
     style: {
       margin: "0 0 8px",
       fontSize: 26,
@@ -10261,7 +10261,7 @@ function HomePage({
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "총 식물종 수",
     value: `${fmt(s.specimens.species)}종`,
-    sub: "기원종 기준",
+    sub: "제주센터 전체",
     accent: "#1a6b3e",
     onClick: () => onNav("species", { tab: "all" })
   }), /*#__PURE__*/React.createElement(StatCard, {
@@ -10343,20 +10343,24 @@ function HomePage({
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#1a6b3e",
     label: "공정서 등재",
-    value: `${fmt(specimenPharmView.both)}점 (${specimenPharmView.bothPct}%)`
+    value: `${fmt(specimenPharmView.both)}점 (${specimenPharmView.bothPct}%)`,
+    onClick: () => onNav("specimen-search", { pharma: "등재" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#4bbf84",
     label: "KP 등재",
-    value: `${fmt(specimenPharmView.kp)}점`
+    value: `${fmt(specimenPharmView.kp)}점`,
+    onClick: () => onNav("specimen-search", { pharma: "KP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#78d4a4",
     label: "KHP 등재",
-    value: `${fmt(specimenPharmView.khp)}점`
+    value: `${fmt(specimenPharmView.khp)}점`,
+    onClick: () => onNav("specimen-search", { pharma: "KHP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미등재",
     value: `${fmt(specimenPharmView.none)}점`,
-    border: true
+    border: true,
+    onClick: () => onNav("specimen-search", { pharma: "미등재" })
   })))), /*#__PURE__*/React.createElement(Section, {
     title: `식물종 공정서 등재율 (${fmt(s.specimens.species)}종)`
   }, /*#__PURE__*/React.createElement("div", {
@@ -10380,20 +10384,24 @@ function HomePage({
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#2563a6",
     label: "공정서 등재",
-    value: `${fmt(speciesPharmView.both)}종 (${speciesPharmView.bothPct}%)`
+    value: `${fmt(speciesPharmView.both)}종 (${speciesPharmView.bothPct}%)`,
+    onClick: () => onNav("species", { pharma: "등재" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#3d87cf",
     label: "KP 등재",
-    value: `${fmt(speciesPharmView.kp)}종`
+    value: `${fmt(speciesPharmView.kp)}종`,
+    onClick: () => onNav("species", { pharma: "KP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#6aaae0",
     label: "KHP 등재",
-    value: `${fmt(speciesPharmView.khp)}종`
+    value: `${fmt(speciesPharmView.khp)}종`,
+    onClick: () => onNav("species", { pharma: "KHP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미등재",
     value: `${fmt(speciesPharmView.none)}종`,
-    border: true
+    border: true,
+    onClick: () => onNav("species", { pharma: "미등재" })
   }))))), /*#__PURE__*/React.createElement(Section, {
     title: `공정서 기원종 ${fmt(s.originCoverage.total)}종 중 제주센터 보유율`,
     style: {
@@ -10956,7 +10964,7 @@ function SpeciesPage({
   const [tab, setTab] = useState(navParams?.tab || "all"); // all | s1 | s3
   const [query, setQuery] = useState("");
   const [familyFilter, setFamilyFilter] = useState("전체");
-  const [pharmaFilter, setPharmaFilter] = useState("전체");
+  const [pharmaFilter, setPharmaFilter] = useState(navParams?.pharma || "전체");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState(null);
   const [showSynonyms, setShowSynonyms] = useState(false); // 이명 관리 화면을 이 페이지 안에서 모달로 띄우기 위한 상태
