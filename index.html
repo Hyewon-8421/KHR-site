@@ -39,6 +39,26 @@ const SUPABASE_URL = "https://rfyovtepspyseidktiea.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_UU8vDCtULeR9XBb-wDgP0g_Ef7eDncE";
 const PHOTO_BUCKET = "specimen-photos"; // Supabase Storage에 미리 생성해두어야 함 (public 버킷)
 
+// ─── 관리자 인증 ──────────────────────────────────────────────────────────
+// Netlify Functions(save-specimens/update-specimen/delete-specimen)이 요구하는
+// apiKey와 동일한 값을 관리자 비밀번호로 사용한다. 로그인에 성공하면
+// sessionStorage에 표시만 남기고(브라우저 탭을 닫으면 자동 로그아웃),
+// 실제 쓰기 요청에는 이 비밀번호 값을 그대로 apiKey로 실어 보낸다.
+const ADMIN_PASSWORD = "jeju2026!";
+function isAdminLoggedIn() {
+  return sessionStorage.getItem("khr_admin") === "1";
+}
+function adminLogin(password) {
+  if (password === ADMIN_PASSWORD) {
+    sessionStorage.setItem("khr_admin", "1");
+    return true;
+  }
+  return false;
+}
+function adminLogout() {
+  sessionStorage.removeItem("khr_admin");
+}
+
 // 관리번호 기준으로 표본 스캔 사진을 불러오고, 개별 추가/삭제할 수 있게 해주는 훅.
 // 파일명 규칙: "관리번호.확장자" 또는 "관리번호-2.확장자", "관리번호-3.확장자" (여러 장)
 function useSpecimenPhotos(id) {
@@ -8682,13 +8702,18 @@ function OriginSpecimenModal({
 function SpecimenModal({
   spec,
   onClose,
-  onSaved
+  onSaved,
+  onDeleted
 }) {
   if (!spec) return null;
+  // 관리자 로그인 여부는 sessionStorage 기준으로 그때그때 확인한다.
+  // (App에서 로그인/로그아웃하면 전체 트리가 다시 렌더링되므로 이 값도 함께 갱신된다)
+  const isAdmin = isAdminLoggedIn();
   const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
   const [form, setForm] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const [id, specNo, storage, location, drugName, korName, sciName, collectDate, collectPlace, importance, genus, family, gps, pharma, project] = spec;
 
@@ -8716,7 +8741,7 @@ function SpecimenModal({
       const res = await fetch("/.netlify/functions/update-specimen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: "jeju2026!", "관리번호": form.id, data: newRow }),
+        body: JSON.stringify({ apiKey: ADMIN_PASSWORD, "관리번호": form.id, data: newRow }),
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || "저장 실패");
@@ -8727,6 +8752,26 @@ function SpecimenModal({
       setSaveMsg({ ok: false, msg: "저장 실패: " + e.message });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`"${korName}" (${id}) 표본을 정말 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return;
+    setDeleting(true);
+    try {
+      const res = await fetch("/.netlify/functions/delete-specimen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: ADMIN_PASSWORD, "관리번호": id, "표본번호": specNo }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "삭제 실패");
+      if (onDeleted) onDeleted(id);
+      onClose();
+    } catch (e) {
+      alert("삭제 실패: " + e.message);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -8784,10 +8829,15 @@ function SpecimenModal({
           !editMode && React.createElement("div", { style: { fontStyle: "italic", color: "#546e7a", fontSize: 12.5 } }, sciName),
         ),
         React.createElement("div", { style: { display: "flex", gap: 6, flexShrink: 0, marginLeft: 8 } },
-          !editMode && React.createElement("button", {
+          !editMode && isAdmin && React.createElement("button", {
             onClick: () => { initForm(); setEditMode(true); setSaveMsg(null); },
             style: { padding: "5px 12px", borderRadius: 7, border: "1px solid #1a6b3e", background: "#e8f5ee", color: "#1a6b3e", cursor: "pointer", fontSize: 12, fontWeight: 600 }
           }, "✏️ 수정"),
+          !editMode && isAdmin && React.createElement("button", {
+            onClick: handleDelete,
+            disabled: deleting,
+            style: { padding: "5px 12px", borderRadius: 7, border: "1px solid #c0392b", background: "#fdeeec", color: "#c0392b", cursor: deleting ? "default" : "pointer", fontSize: 12, fontWeight: 600 }
+          }, deleting ? "삭제 중..." : "🗑 삭제"),
           React.createElement("button", {
             onClick: onClose,
             style: { background: "#f4f8f4", border: "none", borderRadius: 7, width: 30, height: 30, cursor: "pointer", fontSize: 16, color: "#546e7a" }
@@ -9137,7 +9187,9 @@ function SpecimenSearchPage({
   reloadSpecimens
 }) {
   const GAS_URL = "https://script.google.com/macros/s/AKfycbxU1t6BC5NGzl9H3x4r_f6vRdu-9A3BWaVEyCmTmJkvwN2B0-iN5-nMUDRg-x8oGageyA/exec";
-  const API_KEY = "jeju2026!";
+  const API_KEY = ADMIN_PASSWORD;
+  // 표본 업로드/수정/삭제는 관리자 로그인 상태에서만 가능하다. 표본 목록 다운로드는 누구나 가능.
+  const isAdmin = isAdminLoggedIn();
 
   // 전체 표본 데이터(extraSpec)는 이제 App에서 사이트가 열릴 때 한 번만
   // 불러와서 props로 전달합니다. 이 페이지는 더 이상 마운트될 때마다
@@ -9295,7 +9347,7 @@ function SpecimenSearchPage({
             const res = await fetch("/.netlify/functions/save-specimens", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ apiKey: "jeju2026!", rows: batch, upsert: isUpsertMode }),
+              body: JSON.stringify({ apiKey: ADMIN_PASSWORD, rows: batch, upsert: isUpsertMode }),
             });
             let json;
             try {
@@ -9409,6 +9461,19 @@ function SpecimenSearchPage({
       gap: 8
     }
   }, /*#__PURE__*/React.createElement("button", {
+    onClick: exportToExcel,
+    style: {
+      padding: "7px 14px",
+      borderRadius: 8,
+      border: "1px solid #2563a6",
+      background: "#fff",
+      color: "#2563a6",
+      cursor: "pointer",
+      fontSize: 12.5,
+      fontWeight: 600
+    }
+  }, "⬇ 조회된 표본 목록 다운로드"),
+  isAdmin && /*#__PURE__*/React.createElement("button", {
     onClick: downloadTemplate,
     style: {
       display: "flex",
@@ -9423,20 +9488,8 @@ function SpecimenSearchPage({
       fontSize: 12.5,
       fontWeight: 600
     }
-  }, "⬇ 업로드 양식 다운로드"), /*#__PURE__*/React.createElement("button", {
-    onClick: exportToExcel,
-    style: {
-      padding: "7px 14px",
-      borderRadius: 8,
-      border: "1px solid #2563a6",
-      background: "#fff",
-      color: "#2563a6",
-      cursor: "pointer",
-      fontSize: 12.5,
-      fontWeight: 600
-    }
-  }, "⬇ 조회된 표본 목록 다운로드"),
-  /*#__PURE__*/React.createElement("button", {
+  }, "⬇ 업로드 양식 다운로드"),
+  isAdmin && /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setShowUpload(!showUpload);
       setUploadState("idle");
@@ -9452,7 +9505,9 @@ function SpecimenSearchPage({
       fontSize: 12.5,
       fontWeight: 600
     }
-  }, showUpload ? "✕ 닫기" : "＋ 표본 업로드")), showUpload && /*#__PURE__*/React.createElement("div", {
+  }, showUpload ? "✕ 닫기" : "＋ 표본 업로드")), !isAdmin && /*#__PURE__*/React.createElement("div", {
+    style: { textAlign: "right", fontSize: 11.5, color: "#95a5a6", marginTop: -6, marginBottom: 12 }
+  }, "🔒 표본 등록·수정·삭제는 관리자 로그인 후 이용할 수 있습니다."), showUpload && isAdmin && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#fff",
       borderRadius: 12,
@@ -9781,6 +9836,10 @@ function SpecimenSearchPage({
         return prev;
       });
       setSelected(newRow);
+    },
+    onDeleted: (deletedId) => {
+      // 삭제된 표본을 전역 캐시(extraSpec)에서도 제거
+      setExtraSpec(prev => prev ? prev.filter(s => s[0] !== deletedId) : prev);
     }
   }));
 }
@@ -12287,7 +12346,7 @@ function SynonymsPage({
         const res = await fetch("/.netlify/functions/save-synonyms", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ apiKey: "jeju2026!", rows: newRows, upsert: true }),
+          body: JSON.stringify({ apiKey: ADMIN_PASSWORD, rows: newRows, upsert: true }),
         });
         const json = await res.json();
         if (!json.ok) throw new Error(json.error || "저장 실패");
@@ -12400,9 +12459,151 @@ function SynonymsPage({
   return /*#__PURE__*/React.createElement("div", null, header, uploadSection, listSection);
 }
 
+// ─── 관리자 로그인 모달 ───────────────────────────────────────────────────────
+function AdminLoginModal({ onClose, onSuccess }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  const submit = () => {
+    if (adminLogin(password)) {
+      onSuccess();
+      onClose();
+    } else {
+      setError("비밀번호가 올바르지 않습니다.");
+    }
+  };
+
+  return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: 360 },
+    React.createElement("div", { style: { padding: 28 } },
+      React.createElement("div", { style: { fontSize: 17, fontWeight: 700, color: "#1a2e1a", marginBottom: 6 } }, "🔒 관리자 로그인"),
+      React.createElement("div", { style: { fontSize: 12.5, color: "#7f8c8d", marginBottom: 18 } }, "표본 업로드·수정·삭제 및 변경 이력 조회는 관리자만 이용할 수 있습니다."),
+      React.createElement("input", {
+        ref: inputRef,
+        type: "password",
+        value: password,
+        placeholder: "관리자 비밀번호",
+        onChange: e => { setPassword(e.target.value); setError(null); },
+        onKeyDown: e => { if (e.key === "Enter") submit(); },
+        style: { width: "100%", boxSizing: "border-box", padding: "10px 12px", border: `1px solid ${error ? "#c0392b" : "#dce8dc"}`, borderRadius: 8, fontSize: 14, marginBottom: 8 }
+      }),
+      error && React.createElement("div", { style: { fontSize: 12, color: "#c0392b", marginBottom: 8 } }, "⚠ " + error),
+      React.createElement("div", { style: { display: "flex", gap: 8, marginTop: 12 } },
+        React.createElement("button", {
+          onClick: onClose,
+          style: { flex: 1, padding: "10px 0", borderRadius: 8, border: "1px solid #dce8dc", background: "#fff", color: "#546e7a", cursor: "pointer", fontSize: 13, fontWeight: 600 }
+        }, "취소"),
+        React.createElement("button", {
+          onClick: submit,
+          style: { flex: 1, padding: "10px 0", borderRadius: 8, border: "none", background: "#1a6b3e", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 700 }
+        }, "로그인")
+      )
+    )
+  );
+}
+
+// ─── 관리자 변경 이력 모달 ─────────────────────────────────────────────────────
+function ActivityLogModal({ onClose }) {
+  const [entries, setEntries] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const PAGE = 100;
+
+  const load = async (nextOffset) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/.netlify/functions/get-activity-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: ADMIN_PASSWORD, offset: nextOffset, limit: PAGE }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "불러오기 실패");
+      setEntries(prev => nextOffset === 0 ? json.data : [...(prev || []), ...json.data]);
+      setOffset(nextOffset + json.data.length);
+      setHasMore(json.hasMore);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(0); }, []);
+
+  const actionLabel = a => a === "upload" ? "⬆ 업로드" : a === "update" ? "✏️ 수정" : a === "delete" ? "🗑 삭제" : a;
+  const actionColor = a => a === "upload" ? "#1a6b3e" : a === "update" ? "#2563a6" : a === "delete" ? "#c0392b" : "#546e7a";
+
+  const fmtDate = iso => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    } catch (e) { return iso; }
+  };
+
+  return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: 760 },
+    React.createElement("div", { style: { padding: 28 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+        React.createElement("div", { style: { fontSize: 17, fontWeight: 700, color: "#1a2e1a" } }, "🗂 표본 데이터 변경 이력"),
+        React.createElement("button", {
+          onClick: onClose,
+          style: { background: "#f4f8f4", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#546e7a" }
+        }, "✕")
+      ),
+      React.createElement("div", { style: { fontSize: 12.5, color: "#7f8c8d", marginBottom: 16 } }, "표본 업로드·수정·삭제 기록을 최근 순으로 보여줍니다."),
+      error && React.createElement("div", { style: { fontSize: 12.5, color: "#c0392b", padding: "10px 0" } }, "⚠ " + error),
+      !error && entries === null && React.createElement("div", { style: { fontSize: 13, color: "#95a5a6", padding: "20px 0", textAlign: "center" } }, "불러오는 중..."),
+      !error && entries && entries.length === 0 && React.createElement("div", { style: { fontSize: 13, color: "#bdc3c7", padding: "20px 0", textAlign: "center" } }, "기록이 없습니다."),
+      entries && entries.length > 0 && React.createElement("div", { style: { maxHeight: 440, overflowY: "auto", border: "1px solid #eef2f5", borderRadius: 10 } },
+        React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12.5 } },
+          React.createElement("thead", null,
+            React.createElement("tr", { style: { background: "#f8fafb", position: "sticky", top: 0 } },
+              ["시각", "작업", "관리번호", "내용"].map(h => React.createElement("th", {
+                key: h,
+                style: { textAlign: "left", padding: "9px 12px", color: "#7f8c8d", fontWeight: 600, borderBottom: "1px solid #eef2f5" }
+              }, h))
+            )
+          ),
+          React.createElement("tbody", null,
+            entries.map((e, i) => React.createElement("tr", { key: e.id || i, style: { borderBottom: "1px solid #f4f8f5" } },
+              React.createElement("td", { style: { padding: "8px 12px", color: "#546e7a", whiteSpace: "nowrap" } }, fmtDate(e.created_at)),
+              React.createElement("td", { style: { padding: "8px 12px" } },
+                React.createElement("span", { style: { color: actionColor(e.action), fontWeight: 700 } }, actionLabel(e.action))
+              ),
+              React.createElement("td", { style: { padding: "8px 12px", fontFamily: "monospace", color: "#1a2e1a" } }, e.spec_id || "—"),
+              React.createElement("td", { style: { padding: "8px 12px", color: "#546e7a" } }, e.detail || "")
+            ))
+          )
+        )
+      ),
+      hasMore && React.createElement("div", { style: { textAlign: "center", marginTop: 12 } },
+        React.createElement("button", {
+          onClick: () => load(offset),
+          disabled: loading,
+          style: { padding: "8px 18px", borderRadius: 8, border: "1px solid #dce8dc", background: "#fff", color: "#546e7a", cursor: loading ? "default" : "pointer", fontSize: 12.5, fontWeight: 600 }
+        }, loading ? "불러오는 중..." : "더 보기")
+      )
+    )
+  );
+}
+
 function App() {
   const [page, setPage] = useState("home");
   const [navParams, setNavParams] = useState(null);
+
+  // ── 관리자 로그인 ─────────────────────────────────────────────────
+  // 표본 업로드/수정/삭제는 관리자 로그인 상태에서만 가능하다.
+  // 로그인 여부는 sessionStorage에 저장되며(브라우저 탭을 닫으면 자동 로그아웃),
+  // isAdmin은 화면 표시(버튼 문구 등)를 위한 상태값이다.
+  const [isAdmin, setIsAdmin] = useState(() => isAdminLoggedIn());
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const handleAdminLogout = () => { adminLogout(); setIsAdmin(false); };
 
   // ── 전체 표본 데이터: App 최상단에서 한 번만 관리 ──────────────────
   // 이전에는 "제주 센터 표본" 페이지에 들어갈 때마다 Supabase에서 다시
@@ -12596,7 +12797,52 @@ function App() {
       transition: "all 0.2s",
       whiteSpace: "nowrap"
     }
-  }, n.label))))), specimensLoading && /*#__PURE__*/React.createElement("div", {
+  }, n.label)), isAdmin ? [
+    /*#__PURE__*/React.createElement("button", {
+      key: "history",
+      onClick: () => setShowHistory(true),
+      style: {
+        background: "transparent",
+        border: "1px solid rgba(255,255,255,0.25)",
+        borderRadius: 7,
+        color: "#fff",
+        padding: "5px 12px",
+        cursor: "pointer",
+        fontSize: 12,
+        fontWeight: 600,
+        whiteSpace: "nowrap"
+      }
+    }, "🗂 변경 이력"),
+    /*#__PURE__*/React.createElement("button", {
+      key: "logout",
+      onClick: handleAdminLogout,
+      style: {
+        background: "rgba(255,255,255,0.15)",
+        border: "1px solid rgba(255,255,255,0.25)",
+        borderRadius: 7,
+        color: "#fff",
+        padding: "5px 12px",
+        cursor: "pointer",
+        fontSize: 12,
+        fontWeight: 600,
+        whiteSpace: "nowrap"
+      }
+    }, "🔓 관리자 로그아웃")
+  ] : /*#__PURE__*/React.createElement("button", {
+    key: "login",
+    onClick: () => setShowAdminLogin(true),
+    style: {
+      background: "transparent",
+      border: "1px solid rgba(255,255,255,0.25)",
+      borderRadius: 7,
+      color: "#fff",
+      padding: "5px 12px",
+      cursor: "pointer",
+      fontSize: 12,
+      fontWeight: 600,
+      whiteSpace: "nowrap"
+    }
+  }, "🔒 관리자 로그인")))), specimensLoading && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "sticky",
       top: 0,
@@ -12671,7 +12917,12 @@ function App() {
       padding: "16px 20px",
       fontSize: 12
     }
-  }, "국립생약자원관 제주 센터 · 대한민국 생약자원 표본관(KHR) 현황 시스템"));
+  }, "국립생약자원관 제주 센터 · 대한민국 생약자원 표본관(KHR) 현황 시스템"), showAdminLogin && /*#__PURE__*/React.createElement(AdminLoginModal, {
+    onClose: () => setShowAdminLogin(false),
+    onSuccess: () => setIsAdmin(true)
+  }), showHistory && /*#__PURE__*/React.createElement(ActivityLogModal, {
+    onClose: () => setShowHistory(false)
+  }));
 }
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(/*#__PURE__*/React.createElement(App, null));
