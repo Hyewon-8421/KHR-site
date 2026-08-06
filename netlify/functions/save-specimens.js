@@ -29,6 +29,25 @@ function httpsPost(url, headers, body) {
   });
 }
 
+// 관리자 활동 이력(업로드/수정/삭제)을 activity_log 테이블에 남긴다.
+// 이력 기록에 실패하더라도 원래 작업(이 경우 업로드)은 이미 끝난 뒤이므로 조용히 무시한다.
+async function logActivity(action, specId, specName, detail) {
+  try {
+    await httpsPost(
+      `${SUPABASE_URL}/rest/v1/activity_log`,
+      {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+      },
+      JSON.stringify([{ action, spec_id: specId || null, spec_name: specName || null, detail: detail || null }])
+    );
+  } catch (e) {
+    // 이력 기록 실패는 무시
+  }
+}
+
 exports.handler = async function(event, context) {
   if (event.httpMethod === "OPTIONS") {
     return {
@@ -97,7 +116,7 @@ exports.handler = async function(event, context) {
         : "resolution=ignore-duplicates,return=minimal";
 
       const result = await httpsPost(
-        `${SUPABASE_URL}/rest/v1/specimens?on_conflict=${encodeURIComponent("관리번호")}`,
+        `${SUPABASE_URL}/rest/v1/specimens`,
         {
           "apikey": SUPABASE_KEY,
           "Authorization": `Bearer ${SUPABASE_KEY}`,
@@ -112,6 +131,13 @@ exports.handler = async function(event, context) {
       }
       totalAdded += chunk.length;
     }
+
+    await logActivity(
+      "upload",
+      null,
+      null,
+      `표본 ${totalAdded}건 업로드 (${isUpsert ? "중복 시 덮어쓰기" : "중복 시 건너뜀"})`
+    );
 
     return {
       statusCode: 200,
