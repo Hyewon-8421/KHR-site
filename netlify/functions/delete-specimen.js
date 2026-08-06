@@ -1,0 +1,121 @@
+const https = require("https");
+
+const SUPABASE_URL = "https://rfyovtepspyseidktiea.supabase.co";
+const SUPABASE_KEY = "sb_publishable_UU8vDCtULeR9XBb-wDgP0g_Ef7eDncE";
+const API_KEY = "jeju2026!";
+
+function httpsRequest(method, url, headers, body) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const buf = body ? Buffer.from(body, "utf8") : null;
+    const options = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method,
+      headers: buf ? { ...headers, "Content-Length": buf.length } : headers,
+    };
+    const req = https.request(options, (res) => {
+      // 응답을 문자열로 바로 이어붙이면(chunk가 Buffer→string으로 암묵 변환되면서)
+      // 한글처럼 UTF-8에서 여러 바이트로 구성되는 문자가 네트워크 청크 경계에서
+      // 끊겨 깨질 수 있습니다. 반드시 Buffer 상태로 모두 모은 뒤,
+      // 끝에서 한 번만 UTF-8 문자열로 변환해야 합니다.
+      const chunks = [];
+      res.on("data", chunk => chunks.push(chunk));
+      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", reject);
+    if (buf) req.write(buf);
+    req.end();
+  });
+}
+
+// 관리자 활동 이력을 activity_log 테이블에 남긴다. 실패해도 삭제 자체는 이미 끝난 뒤이므로 조용히 무시.
+async function logActivity(action, specId, specName, detail) {
+  try {
+    await httpsRequest(
+      "POST",
+      `${SUPABASE_URL}/rest/v1/activity_log`,
+      {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+      },
+      JSON.stringify([{ action, spec_id: specId || null, spec_name: specName || null, detail: detail || null }])
+    );
+  } catch (e) {
+    // 이력 기록 실패는 무시
+  }
+}
+
+exports.handler = async function(event, context) {
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+      body: "",
+    };
+  }
+
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, headers: { "Access-Control-Allow-Origin": "*" }, body: "Method Not Allowed" };
+  }
+
+  try {
+    const parsed = JSON.parse(event.body);
+
+    if (parsed.apiKey !== API_KEY) {
+      return {
+        statusCode: 401,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ ok: false, error: "인증 실패" }),
+      };
+    }
+
+    const id = parsed["관리번호"];
+    if (!id) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ ok: false, error: "관리번호 없음" }),
+      };
+    }
+
+    const encodedId = encodeURIComponent(id);
+    const result = await httpsRequest(
+      "DELETE",
+      `${SUPABASE_URL}/rest/v1/specimens?관리번호=eq.${encodedId}`,
+      {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Prefer": "return=minimal",
+      },
+      null
+    );
+
+    if (result.status !== 200 && result.status !== 204) {
+      throw new Error(`Supabase 오류 (${result.status}): ${result.body.substring(0, 200)}`);
+    }
+
+    await logActivity("delete", id, parsed["표본번호"] || "", "표본 삭제");
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+      body: JSON.stringify({ ok: true }),
+    };
+  } catch (err) {
+    return {
+      statusCode: 500,
+      headers: { "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({ ok: false, error: err.message }),
+    };
+  }
+};
