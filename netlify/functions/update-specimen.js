@@ -29,6 +29,45 @@ function httpsPatch(url, headers, body) {
   });
 }
 
+function httpsPost(url, headers, body) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const buf = Buffer.from(body, "utf8");
+    const options = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: "POST",
+      headers: { ...headers, "Content-Length": buf.length },
+    };
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on("data", chunk => chunks.push(chunk));
+      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", reject);
+    req.write(buf);
+    req.end();
+  });
+}
+
+// 관리자 활동 이력을 activity_log 테이블에 남긴다. 실패해도 원래 작업에는 영향 없음.
+async function logActivity(action, specId, specName, detail) {
+  try {
+    await httpsPost(
+      `${SUPABASE_URL}/rest/v1/activity_log`,
+      {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+      },
+      JSON.stringify([{ action, spec_id: specId || null, spec_name: specName || null, detail: detail || null }])
+    );
+  } catch (e) {
+    // 이력 기록 실패는 무시
+  }
+}
+
 exports.handler = async function(event, context) {
   if (event.httpMethod === "OPTIONS") {
     return {
@@ -102,6 +141,8 @@ exports.handler = async function(event, context) {
     if (result.status !== 200 && result.status !== 204) {
       throw new Error(`Supabase 오류 (${result.status}): ${result.body.substring(0, 200)}`);
     }
+
+    await logActivity("update", id, record["표본번호"] || "", "표본 정보 수정");
 
     return {
       statusCode: 200,
