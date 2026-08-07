@@ -8640,7 +8640,7 @@ function OriginSpecimenModal({
     if (resolved !== originName) return false;
     const ph = (sp[13] || "").trim();
     return ph.includes("KP") || ph.includes("KHP");
-  }).slice(0, 50);
+  }); // 전체 조회 (예전에는 최대 50개로 제한되어 있었음)
 
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Modal, {
     onClose: onClose
@@ -8699,6 +8699,54 @@ function OriginSpecimenModal({
 }
 
 // ─── 표본 상세 모달 ───────────────────────────────────────────────────────────
+// 표본 수정 폼의 입력 필드 하나를 그린다.
+// 예전에는 이 컴포넌트가 SpecimenModal의 렌더 함수 "안에서" 매번 새로 정의되고 있었는데,
+// 그러면 리렌더될 때마다(=글자를 한 자 입력할 때마다) React가 이전 것과 "다른 컴포넌트"로
+// 인식해서 DOM을 새로 만들고 입력창의 포커스를 잃어버린다 — 그래서 한 글자만 입력해도
+// 다시 클릭해야 다음 글자를 입력할 수 있었던 것(붙여넣기는 한 번의 이벤트라 문제없이 됐음).
+// 컴포넌트를 바깥(모듈 스코프)으로 빼서 매 렌더마다 같은 컴포넌트로 유지되게 했다.
+function SpecimenFormField({ form, setForm, label, field }) {
+  return React.createElement("div", {
+    style: { marginBottom: 10 }
+  },
+    React.createElement("div", { style: { fontSize: 11, color: "#7f8c8d", marginBottom: 3 } }, label),
+    field === "수장고"
+      ? React.createElement("select", {
+          value: form[field] || "",
+          onChange: e => setForm({ ...form, [field]: e.target.value }),
+          style: { width: "100%", padding: "7px 10px", border: "1px solid #dce8dc", borderRadius: 7, fontSize: 13 }
+        },
+          React.createElement("option", { value: "1수장고" }, "1수장고"),
+          React.createElement("option", { value: "3수장고" }, "3수장고")
+        )
+      : field === "중요도"
+      ? React.createElement("select", {
+          value: form[field] || "",
+          onChange: e => setForm({ ...form, [field]: e.target.value }),
+          style: { width: "100%", padding: "7px 10px", border: "1px solid #dce8dc", borderRadius: 7, fontSize: 13 }
+        },
+          ["A1","A2","B1","B2-1","B2-2","B2-3","B2-4"].map(v =>
+            React.createElement("option", { key: v, value: v }, v)
+          )
+        )
+      : field === "공정서"
+      ? React.createElement("select", {
+          value: form[field] || "",
+          onChange: e => setForm({ ...form, [field]: e.target.value }),
+          style: { width: "100%", padding: "7px 10px", border: "1px solid #dce8dc", borderRadius: 7, fontSize: 13 }
+        },
+          ["","KP","KHP","KP, KHP"].map(v =>
+            React.createElement("option", { key: v, value: v }, v || "해당 없음")
+          )
+        )
+      : React.createElement("input", {
+          value: form[field] || "",
+          onChange: e => setForm({ ...form, [field]: e.target.value }),
+          style: { width: "100%", boxSizing: "border-box", padding: "7px 10px", border: "1px solid #dce8dc", borderRadius: 7, fontSize: 13 }
+        })
+  );
+}
+
 function SpecimenModal({
   spec,
   onClose,
@@ -8775,46 +8823,6 @@ function SpecimenModal({
     }
   };
 
-  const F = ({ label, field, type }) => React.createElement("div", {
-    style: { marginBottom: 10 }
-  },
-    React.createElement("div", { style: { fontSize: 11, color: "#7f8c8d", marginBottom: 3 } }, label),
-    field === "수장고"
-      ? React.createElement("select", {
-          value: form[field] || "",
-          onChange: e => setForm({ ...form, [field]: e.target.value }),
-          style: { width: "100%", padding: "7px 10px", border: "1px solid #dce8dc", borderRadius: 7, fontSize: 13 }
-        },
-          React.createElement("option", { value: "1수장고" }, "1수장고"),
-          React.createElement("option", { value: "3수장고" }, "3수장고")
-        )
-      : field === "중요도"
-      ? React.createElement("select", {
-          value: form[field] || "",
-          onChange: e => setForm({ ...form, [field]: e.target.value }),
-          style: { width: "100%", padding: "7px 10px", border: "1px solid #dce8dc", borderRadius: 7, fontSize: 13 }
-        },
-          ["A1","A2","B1","B2-1","B2-2","B2-3","B2-4"].map(v =>
-            React.createElement("option", { key: v, value: v }, v)
-          )
-        )
-      : field === "공정서"
-      ? React.createElement("select", {
-          value: form[field] || "",
-          onChange: e => setForm({ ...form, [field]: e.target.value }),
-          style: { width: "100%", padding: "7px 10px", border: "1px solid #dce8dc", borderRadius: 7, fontSize: 13 }
-        },
-          ["","KP","KHP","KP, KHP"].map(v =>
-            React.createElement("option", { key: v, value: v }, v || "해당 없음")
-          )
-        )
-      : React.createElement("input", {
-          value: form[field] || "",
-          onChange: e => setForm({ ...form, [field]: e.target.value }),
-          style: { width: "100%", boxSizing: "border-box", padding: "7px 10px", border: "1px solid #dce8dc", borderRadius: 7, fontSize: 13 }
-        })
-  );
-
   return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: editMode ? 680 : 960 },
     React.createElement("div", { style: { padding: "22px 24px 0" } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 } },
@@ -8849,21 +8857,21 @@ function SpecimenModal({
     editMode
       ? React.createElement("div", { style: { padding: "0 24px 24px" } },
           React.createElement("div", { style: { borderTop: "1px solid #eef2f5", paddingTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" } },
-            React.createElement(F, { label: "관리번호", field: "id" }),
-            React.createElement(F, { label: "표본번호", field: "specNo" }),
-            React.createElement(F, { label: "수장고", field: "수장고" }),
-            React.createElement(F, { label: "수장위치", field: "location" }),
-            React.createElement(F, { label: "생약명", field: "drugName" }),
-            React.createElement(F, { label: "국명", field: "korName" }),
-            React.createElement("div", { style: { gridColumn: "1 / -1" } }, React.createElement(F, { label: "학명", field: "sciName" })),
-            React.createElement(F, { label: "수집날짜", field: "collectDate" }),
-            React.createElement(F, { label: "중요도", field: "중요도" }),
-            React.createElement(F, { label: "속명", field: "genus" }),
-            React.createElement(F, { label: "과명", field: "family" }),
-            React.createElement(F, { label: "공정서", field: "공정서" }),
-            React.createElement("div", { style: { gridColumn: "1 / -1" } }, React.createElement(F, { label: "수집장소", field: "collectPlace" })),
-            React.createElement("div", { style: { gridColumn: "1 / -1" } }, React.createElement(F, { label: "GPS", field: "gps" })),
-            React.createElement("div", { style: { gridColumn: "1 / -1" } }, React.createElement(F, { label: "과제명", field: "project" })),
+            React.createElement(SpecimenFormField, { form, setForm, label: "관리번호", field: "id" }),
+            React.createElement(SpecimenFormField, { form, setForm, label: "표본번호", field: "specNo" }),
+            React.createElement(SpecimenFormField, { form, setForm, label: "수장고", field: "수장고" }),
+            React.createElement(SpecimenFormField, { form, setForm, label: "수장위치", field: "location" }),
+            React.createElement(SpecimenFormField, { form, setForm, label: "생약명", field: "drugName" }),
+            React.createElement(SpecimenFormField, { form, setForm, label: "국명", field: "korName" }),
+            React.createElement("div", { style: { gridColumn: "1 / -1" } }, React.createElement(SpecimenFormField, { form, setForm, label: "학명", field: "sciName" })),
+            React.createElement(SpecimenFormField, { form, setForm, label: "수집날짜", field: "collectDate" }),
+            React.createElement(SpecimenFormField, { form, setForm, label: "중요도", field: "중요도" }),
+            React.createElement(SpecimenFormField, { form, setForm, label: "속명", field: "genus" }),
+            React.createElement(SpecimenFormField, { form, setForm, label: "과명", field: "family" }),
+            React.createElement(SpecimenFormField, { form, setForm, label: "공정서", field: "공정서" }),
+            React.createElement("div", { style: { gridColumn: "1 / -1" } }, React.createElement(SpecimenFormField, { form, setForm, label: "수집장소", field: "collectPlace" })),
+            React.createElement("div", { style: { gridColumn: "1 / -1" } }, React.createElement(SpecimenFormField, { form, setForm, label: "GPS", field: "gps" })),
+            React.createElement("div", { style: { gridColumn: "1 / -1" } }, React.createElement(SpecimenFormField, { form, setForm, label: "과제명", field: "project" })),
           ),
           React.createElement(SpecimenPhotoGallery, { id, editable: true }),
           saveMsg && React.createElement("div", {
@@ -10316,13 +10324,13 @@ function HomePage({
     value: `${fmt(s.specimens.total)}점`,
     sub: "제주센터 전체",
     accent: "#1a6b3e",
-    onClick: () => onNav("specimen-search")
+    onClick: () => onNav("jeju-center", { subTab: "specimen" })
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "총 식물종 수",
     value: `${fmt(s.specimens.species)}종`,
     sub: "제주센터 전체",
     accent: "#1a6b3e",
-    onClick: () => onNav("species", { tab: "all" })
+    onClick: () => onNav("jeju-center", { subTab: "species", tab: "all" })
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "공정서 식물류 생약",
     value: `${fmt(s.pharmacopoeia.total)}종`,
@@ -10334,19 +10342,19 @@ function HomePage({
     value: `${fmt(s.pharmacopoeia.origins)}종`,
     sub: "버섯 8종 포함",
     accent: "#2563a6",
-    onClick: () => onNav("pharma")
+    onClick: () => onNav("stats", { subTab: "pharma" })
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "제1수장고 표본",
     value: `${fmt(st.storage1.total)}점`,
     sub: `${fmt(s.storage1.species)} 기원종`,
     accent: "#2d9c63",
-    onClick: () => onNav("specimen-search", { storage: "1수장고" })
+    onClick: () => onNav("jeju-center", { subTab: "specimen", storage: "1수장고" })
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "제3수장고 표본",
     value: `${fmt(st.storage3.total)}점`,
     sub: `${fmt(s.storage3.species)} 기원종`,
     accent: "#1a4a7a",
-    onClick: () => onNav("specimen-search", { storage: "3수장고" })
+    onClick: () => onNav("jeju-center", { subTab: "specimen", storage: "3수장고" })
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -10403,23 +10411,23 @@ function HomePage({
     color: "#1a6b3e",
     label: "공정서 등재",
     value: `${fmt(specimenPharmView.both)}점 (${specimenPharmView.bothPct}%)`,
-    onClick: () => onNav("specimen-search", { pharma: "등재" })
+    onClick: () => onNav("jeju-center", { subTab: "specimen", pharma: "등재" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#4bbf84",
     label: "KP 등재",
     value: `${fmt(specimenPharmView.kp)}점`,
-    onClick: () => onNav("specimen-search", { pharma: "KP" })
+    onClick: () => onNav("jeju-center", { subTab: "specimen", pharma: "KP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#78d4a4",
     label: "KHP 등재",
     value: `${fmt(specimenPharmView.khp)}점`,
-    onClick: () => onNav("specimen-search", { pharma: "KHP" })
+    onClick: () => onNav("jeju-center", { subTab: "specimen", pharma: "KHP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미등재",
     value: `${fmt(specimenPharmView.none)}점`,
     border: true,
-    onClick: () => onNav("specimen-search", { pharma: "미등재" })
+    onClick: () => onNav("jeju-center", { subTab: "specimen", pharma: "미등재" })
   })))), /*#__PURE__*/React.createElement(Section, {
     title: `식물종 공정서 등재율 (${fmt(s.specimens.species)}종)`
   }, /*#__PURE__*/React.createElement("div", {
@@ -10444,23 +10452,23 @@ function HomePage({
     color: "#2563a6",
     label: "공정서 등재",
     value: `${fmt(speciesPharmView.both)}종 (${speciesPharmView.bothPct}%)`,
-    onClick: () => onNav("species", { pharma: "등재" })
+    onClick: () => onNav("jeju-center", { subTab: "species", pharma: "등재" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#3d87cf",
     label: "KP 등재",
     value: `${fmt(speciesPharmView.kp)}종`,
-    onClick: () => onNav("species", { pharma: "KP" })
+    onClick: () => onNav("jeju-center", { subTab: "species", pharma: "KP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#6aaae0",
     label: "KHP 등재",
     value: `${fmt(speciesPharmView.khp)}종`,
-    onClick: () => onNav("species", { pharma: "KHP" })
+    onClick: () => onNav("jeju-center", { subTab: "species", pharma: "KHP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미등재",
     value: `${fmt(speciesPharmView.none)}종`,
     border: true,
-    onClick: () => onNav("species", { pharma: "미등재" })
+    onClick: () => onNav("jeju-center", { subTab: "species", pharma: "미등재" })
   }))))), /*#__PURE__*/React.createElement(Section, {
     title: `공정서 기원종 ${fmt(s.originCoverage.total)}종 중 제주센터 보유율`,
     style: {
@@ -10527,45 +10535,36 @@ function HomePage({
     title: "공정서 생약 검색",
     desc: `KP·KHP 등재 ${fmt(s.pharmacopoeia.total)}종 생약 전체 검색 및 기원종 상세 조회`,
     stats: [`${fmt(s.pharmacopoeia.total)}종 생약`, `${fmt(s.pharmacopoeia.origins)}개 기원종`],
-    color: "#2563a6"
+    color: "#2563a6",
+    navTo: ["pharma-search"]
   }, {
-    id: "specimen-search",
+    id: "jeju-center",
     icon: "🌱",
-    title: "제주 센터 표본",
-    desc: `전체 ${fmt(s.specimens.total)}점 표본 검색 — 수장고·과명·공정서 필터 및 신규 표본 업로드`,
-    stats: [`${fmt(s.specimens.total)}점`, `${fmt(s.specimens.species)}종`],
-    color: "#1a6b3e"
-  }, {
-    id: "species",
-    icon: "🌿",
-    title: "식물종 정보",
-    desc: "수집 표본의 식물종 목록 — 전체·제1수장고·제3수장고별 조회 및 공정서 등재 현황",
-    stats: [`${fmt(s.specimens.species)}종 전체`, `${fmt(s.storage1.species)}종 제1수장고`, `${fmt(s.storage3.species)}종 제3수장고`]
+    title: "제주센터",
+    desc: `전체 ${fmt(s.specimens.total)}점 표본 검색 및 ${fmt(s.specimens.species)}종 식물종(기원종) 정보 조회`,
+    stats: [`${fmt(s.specimens.total)}점 표본`, `${fmt(s.specimens.species)}종 식물종`],
+    color: "#1a6b3e",
+    navTo: ["jeju-center", { subTab: "specimen" }]
   }, {
     id: "map",
     icon: "🗺",
     title: "생약 위치 지도",
     desc: `${fmt(s.map.points)}점 표본의 GPS 좌표를 지도에 표시 — 마커 클릭으로 표본 조회`,
     stats: [`${fmt(s.map.locations)}개 위치`, `${fmt(s.map.points)}점 매핑`],
-    color: "#7a3d1a"
+    color: "#7a3d1a",
+    navTo: ["map"]
   }, {
-    id: "pharma",
+    id: "stats",
     icon: "📊",
-    title: "공정서 정보 통계",
-    desc: "공정서 등재 현황 통계 및 과별·약용부위별 분포",
-    stats: ["KP 250종", "KHP 422종"],
-    color: "#2563a6"
-  }, {
-    id: "specimen",
-    icon: "📦",
-    title: "표본 현황 통계",
-    desc: "제1·3수장고별 분포, 중요도, 공정서 등재율",
-    stats: [`제1수장고 ${fmt(st.storage1.total)}점`, `제3수장고 ${fmt(st.storage3.total)}점`],
-    color: "#1a6b3e"
+    title: "통계",
+    desc: "공정서 등재 현황, 과별·약용부위별 분포 및 표본 현황(수장고별, 중요도) 통계",
+    stats: [`공정서 기원종 ${fmt(s.pharmacopoeia.origins)}종`, `표본 ${fmt(s.specimens.total)}점`],
+    color: "#2563a6",
+    navTo: ["stats", { subTab: "pharma" }]
   }].map(c => /*#__PURE__*/React.createElement(NavCard, {
     key: c.id,
     ...c,
-    onClick: () => onNav(c.id)
+    onClick: () => onNav(...c.navTo)
   }))));
 }
 function NavCard({
@@ -11354,8 +11353,8 @@ function SpeciesModal({
   const pharmaBg = s.pharma === "KP" ? "#e6f1fb" : s.pharma === "KHP" ? "#e8f5ee" : s.pharma === "KP, KHP" ? "#faeeda" : "#f4f8f4";
   const [selectedSpec, setSelectedSpec] = useState(null); // 목록에서 클릭한 개별 표본(상세 보기용)
 
-  // 표본 목록: __SPEC__에서 학명 매칭
-  const specList = (window.__SPEC__ || []).filter(sp => sp[6] && sp[6].trim() === (s.sciName || "").trim()).slice(0, 50);
+  // 표본 목록: __SPEC__에서 학명 매칭 (전체 조회 — 예전에는 최대 50개로 제한되어 있었음)
+  const specList = (window.__SPEC__ || []).filter(sp => sp[6] && sp[6].trim() === (s.sciName || "").trim());
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Modal, {
     onClose: onClose
   }, /*#__PURE__*/React.createElement("div", {
@@ -11477,7 +11476,7 @@ function SpeciesModal({
       textTransform: "uppercase",
       letterSpacing: .4
     }
-  }, "수장 표본 ", specList.length > 0 ? `${specList.length}건` : "", specList.length === 50 ? " (최대 50건)" : ""), specList.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, "수장 표본 ", specList.length > 0 ? `${specList.length}건` : ""), specList.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: 20,
@@ -12592,6 +12591,71 @@ function ActivityLogModal({ onClose }) {
   );
 }
 
+// ─── 제주센터 (표본 검색 + 식물종 정보 통합 페이지) ──────────────────────────────
+// 예전에는 "제주 센터 표본"과 "식물종 정보"가 각각 별도의 상단 메뉴였는데,
+// 메뉴가 많아져 어수선해져서 "제주센터"라는 하나의 메뉴 아래 탭으로 묶었다.
+// 내부적으로는 기존 SpecimenSearchPage/SpeciesPage 컴포넌트를 그대로 쓰고,
+// 어느 탭을 먼저 보여줄지만 navParams.subTab으로 제어한다.
+function JejuCenterPage({ navParams, extraSpec, setExtraSpec, gsLoading, gsError, reloadSpecimens, synonyms, reloadSynonyms }) {
+  const [subTab, setSubTab] = useState(navParams?.subTab || "specimen"); // specimen | species
+
+  // 대시보드 등에서 다시 이 페이지로 이동하면(navParams가 바뀌면) 지정된 탭으로 전환
+  useEffect(() => {
+    if (navParams?.subTab) setSubTab(navParams.subTab);
+  }, [navParams]);
+
+  return /*#__PURE__*/React.createElement("div", null,
+    React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 18 } },
+      [{ id: "specimen", label: "🌱 표본 검색" }, { id: "species", label: "🌿 식물종 정보" }].map(t => React.createElement("button", {
+        key: t.id,
+        onClick: () => setSubTab(t.id),
+        style: {
+          padding: "9px 18px",
+          borderRadius: 9,
+          border: `1px solid ${subTab === t.id ? "#1a6b3e" : "#dce8dc"}`,
+          background: subTab === t.id ? "#1a6b3e" : "#fff",
+          color: subTab === t.id ? "#fff" : "#546e7a",
+          cursor: "pointer",
+          fontSize: 13.5,
+          fontWeight: 700
+        }
+      }, t.label))
+    ),
+    subTab === "specimen" && React.createElement(SpecimenSearchPage, { navParams, extraSpec, setExtraSpec, gsLoading, gsError, reloadSpecimens }),
+    subTab === "species" && React.createElement(SpeciesPage, { navParams, synonyms, reloadSynonyms })
+  );
+}
+
+// ─── 통계 (공정서 통계 + 표본 통계 통합 페이지) ─────────────────────────────────
+function StatsPage({ navParams }) {
+  const [subTab, setSubTab] = useState(navParams?.subTab || "pharma"); // pharma | specimen
+
+  useEffect(() => {
+    if (navParams?.subTab) setSubTab(navParams.subTab);
+  }, [navParams]);
+
+  return /*#__PURE__*/React.createElement("div", null,
+    React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 18 } },
+      [{ id: "pharma", label: "📊 공정서 통계" }, { id: "specimen", label: "📦 표본 통계" }].map(t => React.createElement("button", {
+        key: t.id,
+        onClick: () => setSubTab(t.id),
+        style: {
+          padding: "9px 18px",
+          borderRadius: 9,
+          border: `1px solid ${subTab === t.id ? "#2563a6" : "#dce8dc"}`,
+          background: subTab === t.id ? "#2563a6" : "#fff",
+          color: subTab === t.id ? "#fff" : "#546e7a",
+          cursor: "pointer",
+          fontSize: 13.5,
+          fontWeight: 700
+        }
+      }, t.label))
+    ),
+    subTab === "pharma" && React.createElement(PharmaStatsPage, null),
+    subTab === "specimen" && React.createElement(SpecimenStatsPage, null)
+  );
+}
+
 function App() {
   const [page, setPage] = useState("home");
   const [navParams, setNavParams] = useState(null);
@@ -12704,20 +12768,14 @@ function App() {
     id: "pharma-search",
     label: "공정서 생약"
   }, {
-    id: "specimen-search",
-    label: "제주 센터 표본"
-  }, {
-    id: "species",
-    label: "식물종 정보"
+    id: "jeju-center",
+    label: "제주센터"
   }, {
     id: "map",
     label: "🗺 생약 지도"
   }, {
-    id: "pharma",
-    label: "공정서 통계"
-  }, {
-    id: "specimen",
-    label: "표본 통계"
+    id: "stats",
+    label: "통계"
   }];
   return /*#__PURE__*/React.createElement("div", {
     style: {
@@ -12894,22 +12952,22 @@ function App() {
     specimensProgress: specimensProgress
   }), page === "pharma-search" && /*#__PURE__*/React.createElement(PharmaSearchPage, {
     navParams: navParams
-  }), page === "specimen-search" && /*#__PURE__*/React.createElement(SpecimenSearchPage, {
+  }), page === "jeju-center" && /*#__PURE__*/React.createElement(JejuCenterPage, {
     navParams: navParams,
     extraSpec: allSpecimens,
     setExtraSpec: setAllSpecimens,
     gsLoading: specimensLoading,
     gsError: specimensError,
-    reloadSpecimens: loadAllSpecimens
-  }), page === "species" && /*#__PURE__*/React.createElement(SpeciesPage, {
-    navParams: navParams,
+    reloadSpecimens: loadAllSpecimens,
     synonyms: synonyms,
     reloadSynonyms: loadSynonyms
   }), page === "map" && /*#__PURE__*/React.createElement(MapPage, {
     specimens: allSpecimens,
     specimensLoading: specimensLoading,
     specimensError: specimensError
-  }), page === "pharma" && /*#__PURE__*/React.createElement(PharmaStatsPage, null), page === "specimen" && /*#__PURE__*/React.createElement(SpecimenStatsPage, null)), /*#__PURE__*/React.createElement("footer", {
+  }), page === "stats" && /*#__PURE__*/React.createElement(StatsPage, {
+    navParams: navParams
+  })), /*#__PURE__*/React.createElement("footer", {
     style: {
       background: "#0f3d22",
       color: "rgba(255,255,255,0.5)",
