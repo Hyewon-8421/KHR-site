@@ -1,0 +1,157 @@
+const https = require("https");
+
+const SUPABASE_URL = "https://rfyovtepspyseidktiea.supabase.co";
+const SUPABASE_KEY = "sb_publishable_UU8vDCtULeR9XBb-wDgP0g_Ef7eDncE";
+const API_KEY = "jeju2026!";
+
+function httpsPost(url, headers, body) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const buf = Buffer.from(body, "utf8");
+    const options = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: "POST",
+      headers: { ...headers, "Content-Length": buf.length },
+    };
+    const req = https.request(options, (res) => {
+      // 응답을 문자열로 바로 이어붙이면(chunk가 Buffer→string으로 암묵 변환되면서)
+      // 한글처럼 UTF-8에서 여러 바이트로 구성되는 문자가 네트워크 청크 경계에서
+      // 끊겨 깨질 수 있습니다. 반드시 Buffer 상태로 모두 모은 뒤,
+      // 끝에서 한 번만 UTF-8 문자열로 변환해야 합니다.
+      const chunks = [];
+      res.on("data", chunk => chunks.push(chunk));
+      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", reject);
+    req.write(buf);
+    req.end();
+  });
+}
+
+// 관리자 활동 이력(업로드/수정/삭제)을 activity_log 테이블에 남긴다.
+// 이력 기록에 실패하더라도 원래 작업(이 경우 업로드)은 이미 끝난 뒤이므로 조용히 무시한다.
+async function logActivity(action, specId, specName, detail) {
+  try {
+    await httpsPost(
+      `${SUPABASE_URL}/rest/v1/activity_log`,
+      {
+        "apikey": SUPABASE_KEY,
+        "Authorization": `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+      },
+      JSON.stringify([{ action, spec_id: specId || null, spec_name: specName || null, detail: detail || null, site: "okcheon" }])
+    );
+  } catch (e) {
+    // 이력 기록 실패는 무시
+  }
+}
+
+exports.handler = async function(event, context) {
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+      },
+      body: "",
+    };
+  }
+
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, headers: { "Access-Control-Allow-Origin": "*" }, body: "Method Not Allowed" };
+  }
+
+  try {
+    const parsed = JSON.parse(event.body);
+
+    if (parsed.apiKey !== API_KEY) {
+      return {
+        statusCode: 401,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ ok: false, error: "인증 실패" }),
+      };
+    }
+
+    const rows = parsed.rows;
+    const isUpsert = parsed.upsert === true; // 수정 모드 여부
+
+    if (!rows || rows.length === 0) {
+      return {
+        statusCode: 400,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ ok: false, error: "데이터 없음" }),
+      };
+    }
+
+    const records = rows.map(r => ({
+      "관리번호": r[0] || "",
+      "표본번호": r[1] || "",
+      "수장고":   r[2] || "",
+      "수장위치": r[3] || "",
+      "생약명":   r[4] || "",
+      "국명":     r[5] || "",
+      "학명":     r[6] || "",
+      "수집날짜": r[7] || "",
+      "수집장소": r[8] || "",
+      "중요도":   r[9] || "",
+      "속명":     r[10] || "",
+      "과명":     r[11] || "",
+      "gps":      r[12] || "",
+      "공정서":   r[13] || "",
+      "과제명":   r[14] || "",
+    }));
+
+    const CHUNK = 200;
+    let totalAdded = 0;
+
+    for (let i = 0; i < records.length; i += CHUNK) {
+      const chunk = records.slice(i, i + CHUNK);
+      // upsert=true면 중복 시 업데이트, false면 중복 무시
+      const prefer = isUpsert
+        ? "resolution=merge-duplicates,return=minimal"
+        : "resolution=ignore-duplicates,return=minimal";
+
+      const result = await httpsPost(
+        `${SUPABASE_URL}/rest/v1/specimens_okcheon`,
+        {
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "Content-Type": "application/json",
+          "Prefer": prefer,
+        },
+        JSON.stringify(chunk)
+      );
+
+      if (result.status !== 200 && result.status !== 201 && result.status !== 204) {
+        throw new Error(`Supabase 오류 (${result.status}): ${result.body.substring(0, 200)}`);
+      }
+      totalAdded += chunk.length;
+    }
+
+    await logActivity(
+      "upload",
+      null,
+      null,
+      `표본 ${totalAdded}건 업로드 (${isUpsert ? "중복 시 덮어쓰기" : "중복 시 건너뜀"})`
+    );
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+      body: JSON.stringify({ ok: true, added: totalAdded }),
+    };
+  } catch (err) {
+    return {
+      statusCode: 500,
+      headers: { "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify({ ok: false, error: err.message }),
+    };
+  }
+};
