@@ -31,7 +31,8 @@ const {
   useState,
   useEffect,
   useCallback,
-  useRef
+  useRef,
+  useMemo
 } = React;
 
 // ─── Supabase 연동 (표본 DB + 표본 스캔 사진 저장소) ─────────────────────────
@@ -8751,9 +8752,18 @@ function SpecimenModal({
   spec,
   onClose,
   onSaved,
-  onDeleted
+  onDeleted,
+  endpoints,
+  hasStorage
 }) {
   if (!spec) return null;
+  // endpoints를 넘기지 않으면 기존(제주센터) 표본 API를 그대로 사용한다 — 하위 호환.
+  const EP = endpoints || {
+    update: "/.netlify/functions/update-specimen",
+    delete: "/.netlify/functions/delete-specimen",
+  };
+  // hasStorage=false이면 수장고 구분이 없는 센터(예: 옥천센터)라는 뜻으로, 수정 폼에서 수장고 입력을 숨긴다.
+  const HAS_STORAGE = hasStorage !== false;
   // 관리자 로그인 여부는 sessionStorage 기준으로 그때그때 확인한다.
   // (App에서 로그인/로그아웃하면 전체 트리가 다시 렌더링되므로 이 값도 함께 갱신된다)
   const isAdmin = isAdminLoggedIn();
@@ -8786,7 +8796,7 @@ function SpecimenModal({
         form.collectPlace, form.importance, form.genus, form.family,
         form.gps, form.pharma, form.project,
       ];
-      const res = await fetch("/.netlify/functions/update-specimen", {
+      const res = await fetch(EP.update, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: ADMIN_PASSWORD, "관리번호": form.id, data: newRow }),
@@ -8807,7 +8817,7 @@ function SpecimenModal({
     if (!confirm(`"${korName}" (${id}) 표본을 정말 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return;
     setDeleting(true);
     try {
-      const res = await fetch("/.netlify/functions/delete-specimen", {
+      const res = await fetch(EP.delete, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: ADMIN_PASSWORD, "관리번호": id, "표본번호": specNo }),
@@ -8859,7 +8869,7 @@ function SpecimenModal({
           React.createElement("div", { style: { borderTop: "1px solid #eef2f5", paddingTop: 14, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" } },
             React.createElement(SpecimenFormField, { form, setForm, label: "관리번호", field: "id" }),
             React.createElement(SpecimenFormField, { form, setForm, label: "표본번호", field: "specNo" }),
-            React.createElement(SpecimenFormField, { form, setForm, label: "수장고", field: "수장고" }),
+            HAS_STORAGE && React.createElement(SpecimenFormField, { form, setForm, label: "수장고", field: "수장고" }),
             React.createElement(SpecimenFormField, { form, setForm, label: "수장위치", field: "location" }),
             React.createElement(SpecimenFormField, { form, setForm, label: "생약명", field: "drugName" }),
             React.createElement(SpecimenFormField, { form, setForm, label: "국명", field: "korName" }),
@@ -9192,10 +9202,23 @@ function SpecimenSearchPage({
   setExtraSpec,
   gsLoading,
   gsError,
-  reloadSpecimens
+  reloadSpecimens,
+  endpoints,
+  centerLabel,
+  hasStorage
 }) {
   const GAS_URL = "https://script.google.com/macros/s/AKfycbxU1t6BC5NGzl9H3x4r_f6vRdu-9A3BWaVEyCmTmJkvwN2B0-iN5-nMUDRg-x8oGageyA/exec";
   const API_KEY = ADMIN_PASSWORD;
+  // endpoints/centerLabel을 넘기지 않으면 기존(제주센터) 표본 API를 그대로 사용한다 — 하위 호환.
+  const EP = endpoints || {
+    save: "/.netlify/functions/save-specimens",
+    update: "/.netlify/functions/update-specimen",
+    delete: "/.netlify/functions/delete-specimen",
+  };
+  const CENTER = centerLabel || "제주센터";
+  // hasStorage=false이면 수장고가 하나뿐이거나 구분이 없는 센터(예: 옥천센터)라는 뜻으로,
+  // 수장고 필터·업로드 검증·수정 폼에서 수장고 관련 UI를 아예 보여주지 않는다.
+  const HAS_STORAGE = hasStorage !== false;
   // 표본 업로드/수정/삭제는 관리자 로그인 상태에서만 가능하다. 표본 목록 다운로드는 누구나 가능.
   const isAdmin = isAdminLoggedIn();
 
@@ -9210,6 +9233,8 @@ function SpecimenSearchPage({
   const [pharmaFilter, setPharmaFilter] = useState(navParams?.pharma || "전체");
   const [selected, setSelected] = useState(null);
   const [page, setPage] = useState(1);
+  const [checkedIds, setCheckedIds] = useState(() => new Set()); // 체크박스로 선택한 관리번호 집합
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [uploadState, setUploadState] = useState("idle");
   const [uploadResult, setUploadResult] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
@@ -9238,24 +9263,55 @@ function SpecimenSearchPage({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "제주센터_표본_업로드_양식.xlsx";
+    a.download = `${CENTER}_표본_업로드_양식.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   // ── 엑셀 다운로드 (검색·필터로 조회된 표본만) ──────────────────────────
-  const exportToExcel = () => {
-    const data = filtered || [];
+  const exportToExcel = (rows, fileTag) => {
+    const data = rows || filtered || [];
     if (data.length === 0) {
       alert("다운로드할 표본이 없습니다. 검색·필터 조건을 확인해주세요.");
       return;
     }
     const COLS = ["관리번호","표본번호","수장고","수장위치","생약명","국명","학명","수집날짜","수집장소","중요도","속명","과명","GPS","공정서","과제명"];
-    const rows = [COLS, ...data.map(s => s.map(v => v || ""))];
-    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const dataRows = [COLS, ...data.map(s => s.map(v => v || ""))];
+    const ws = XLSX.utils.aoa_to_sheet(dataRows);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "제주센터 표본");
-    XLSX.writeFile(wb, "제주센터_조회표본_" + new Date().toISOString().slice(0,10) + ".xlsx");
+    XLSX.utils.book_append_sheet(wb, ws, `${CENTER} 표본`);
+    XLSX.writeFile(wb, `${CENTER}_${fileTag || "조회표본"}_` + new Date().toISOString().slice(0,10) + ".xlsx");
+  };
+
+  // ── 선택 삭제 (체크박스로 고른 표본을 한 번에 삭제, 관리자만) ──────────
+  const bulkDeleteSelected = async () => {
+    const ids = Array.from(checkedIds);
+    if (ids.length === 0) return;
+    if (!confirm(`선택한 표본 ${ids.length}건을 정말 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return;
+    setBulkDeleting(true);
+    const failed = [];
+    for (const id of ids) {
+      try {
+        const specNo = (extraSpec || []).find(s => s[0] === id)?.[1] || "";
+        const res = await fetch(EP.delete, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey: ADMIN_PASSWORD, "관리번호": id, "표본번호": specNo }),
+        });
+        const json = await res.json();
+        if (!json.ok) failed.push(id);
+      } catch (e) {
+        failed.push(id);
+      }
+    }
+    // 삭제에 성공한 것만 화면/캐시에서 제거
+    const deletedSet = new Set(ids.filter(id => !failed.includes(id)));
+    setExtraSpec(prev => prev ? prev.filter(s => !deletedSet.has(s[0])) : prev);
+    setCheckedIds(new Set());
+    setBulkDeleting(false);
+    if (failed.length > 0) {
+      alert(`${failed.length}건 삭제 실패, ${deletedSet.size}건 삭제 완료.`);
+    }
   };
 
   // ── 엑셀 업로드 → 파싱 → DB 저장 ──────────────────────────
@@ -9276,17 +9332,16 @@ function SpecimenSearchPage({
           type: "array",
           cellDates: true
         });
-        const sheetName = wb.SheetNames.includes("제주센터 표본") ? "제주센터 표본" : wb.SheetNames[0];
+        const sheetName = wb.SheetNames.includes(`${CENTER} 표본`) ? `${CENTER} 표본` : wb.SheetNames[0];
         const ws = wb.Sheets[sheetName];
         const rows = XLSX.utils.sheet_to_json(ws, {
           defval: ""
         });
-        const REQUIRED = ["관리번호", "국명", "학명", "수장고"];
+        const REQUIRED = HAS_STORAGE ? ["관리번호", "국명", "학명", "수장고"] : ["관리번호", "국명", "학명"];
         const VALID_STORAGE = ["1수장고", "3수장고"];
         let errors = [];
-        const base = window.__SPEC__ || [];
         // DB에 이미 존재하는 관리번호 목록 (추가 모드에서 중복 스킵 판단용)
-        const dbExistingIds = new Set([...base.map(s => s[0]), ...(extraSpec || []).map(s => s[0])]);
+        const dbExistingIds = new Set((extraSpec || []).map(s => s[0]));
         // 같은 업로드 파일 안에서 관리번호가 중복되는지 별도로 추적 (모드와 무관하게 항상 걸러야 함:
         // 한 번의 저장 요청 안에 같은 관리번호가 두 번 들어가면 DB 저장 시 충돌이 나기 때문)
         const seenInFile = new Set();
@@ -9300,7 +9355,7 @@ function SpecimenSearchPage({
               return;
             }
           }
-          if (!VALID_STORAGE.includes(String(row["수장고"]).trim())) {
+          if (HAS_STORAGE && !VALID_STORAGE.includes(String(row["수장고"]).trim())) {
             errors.push(`행 ${rowNum}: 수장고 값 오류`);
             return;
           }
@@ -9320,7 +9375,7 @@ function SpecimenSearchPage({
             const d = row["수집날짜"];
             dateStr = d instanceof Date ? d.toISOString().slice(0, 10) : String(d).slice(0, 10);
           }
-          newRows.push([id, String(row["표본번호"] || "").trim(), String(row["수장고"]).trim(), String(row["수장위치"] || "").trim(), String(row["생약명"] || "").trim(), String(row["국명"]).trim(), String(row["학명"]).trim(), dateStr, String(row["수집장소"] || "").trim(), String(row["중요도"] || "").trim(), String(row["속명"] || "").trim(), String(row["과명"] || "").trim(), String(row["GPS"] || "").trim(), String(row["공정서"] || "").trim(), String(row["과제명"] || "").trim()]);
+          newRows.push([id, String(row["표본번호"] || "").trim(), String(row["수장고"] || "").trim(), String(row["수장위치"] || "").trim(), String(row["생약명"] || "").trim(), String(row["국명"]).trim(), String(row["학명"]).trim(), dateStr, String(row["수집장소"] || "").trim(), String(row["중요도"] || "").trim(), String(row["속명"] || "").trim(), String(row["과명"] || "").trim(), String(row["GPS"] || "").trim(), String(row["공정서"] || "").trim(), String(row["과제명"] || "").trim()]);
           seenInFile.add(id);
         });
         if (newRows.length === 0) {
@@ -9352,7 +9407,7 @@ function SpecimenSearchPage({
               errors: []
             });
 
-            const res = await fetch("/.netlify/functions/save-specimens", {
+            const res = await fetch(EP.save, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ apiKey: ADMIN_PASSWORD, rows: batch, upsert: isUpsertMode }),
@@ -9424,7 +9479,7 @@ function SpecimenSearchPage({
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const extraCount = extraSpec ? extraSpec.length : 0;
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SectionHeader, {
-    title: "제주 센터 표본",
+    title: `${CENTER} 표본`,
     sub: "전체 표본 검색 및 신규 표본 업로드 — 관리번호·생약명·국명·학명·수집장소로 검색 가능",
     color: "#1a6b3e"
   }), /*#__PURE__*/React.createElement("div", {
@@ -9469,7 +9524,7 @@ function SpecimenSearchPage({
       gap: 8
     }
   }, /*#__PURE__*/React.createElement("button", {
-    onClick: exportToExcel,
+    onClick: () => exportToExcel(),
     style: {
       padding: "7px 14px",
       borderRadius: 8,
@@ -9537,7 +9592,7 @@ function SpecimenSearchPage({
       marginBottom: 16,
       lineHeight: 1.6
     }
-  }, "업로드 양식의 ", /*#__PURE__*/React.createElement("b", null, "\"제주센터 표본\""), " 시트에 입력 후 업로드하세요.", /*#__PURE__*/React.createElement("br", null), "업로드된 표본은 ", /*#__PURE__*/React.createElement("b", null, "Supabase에 자동 저장"), "되어 누가 접속해도 동일하게 표시됩니다."),
+  }, "업로드 양식의 ", /*#__PURE__*/React.createElement("b", null, `"${CENTER} 표본"`), " 시트에 입력 후 업로드하세요.", /*#__PURE__*/React.createElement("br", null), "업로드된 표본은 ", /*#__PURE__*/React.createElement("b", null, "Supabase에 자동 저장"), "되어 누가 접속해도 동일하게 표시됩니다."),
     /*#__PURE__*/React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 10 } },
       /*#__PURE__*/React.createElement("button", {
         onClick: () => setIsUpsertMode(false),
@@ -9699,7 +9754,7 @@ function SpecimenSearchPage({
       marginBottom: 20,
       flexWrap: "wrap"
     }
-  }, /*#__PURE__*/React.createElement(FilterSelect, {
+  }, HAS_STORAGE && /*#__PURE__*/React.createElement(FilterSelect, {
     label: "수장고",
     value: storageFilter,
     options: ["전체", "1수장고", "3수장고"],
@@ -9730,9 +9785,28 @@ function SpecimenSearchPage({
       fontSize: 13,
       alignSelf: "center",
       display: "flex",
-      gap: 8
+      gap: 10,
+      alignItems: "center"
     }
-  }, /*#__PURE__*/React.createElement("span", null, fmt(filtered.length), "건"))), /*#__PURE__*/React.createElement("div", {
+  },
+    checkedIds.size > 0 && /*#__PURE__*/React.createElement("span", {
+      style: { color: "#1a6b3e", fontWeight: 700 }
+    }, `${fmt(checkedIds.size)}건 선택됨`),
+    checkedIds.size > 0 && /*#__PURE__*/React.createElement("button", {
+      onClick: () => exportToExcel((extraSpec || []).filter(s => checkedIds.has(s[0])), "선택표본"),
+      style: { padding: "5px 12px", borderRadius: 7, border: "1px solid #2563a6", background: "#fff", color: "#2563a6", cursor: "pointer", fontSize: 12, fontWeight: 600 }
+    }, "⬇ 선택 엑셀 다운로드"),
+    checkedIds.size > 0 && isAdmin && /*#__PURE__*/React.createElement("button", {
+      onClick: bulkDeleteSelected,
+      disabled: bulkDeleting,
+      style: { padding: "5px 12px", borderRadius: 7, border: "1px solid #c0392b", background: "#fdeeec", color: "#c0392b", cursor: bulkDeleting ? "default" : "pointer", fontSize: 12, fontWeight: 600 }
+    }, bulkDeleting ? "삭제 중..." : "🗑 선택 삭제"),
+    checkedIds.size > 0 && /*#__PURE__*/React.createElement("button", {
+      onClick: () => setCheckedIds(new Set()),
+      style: { padding: "5px 10px", borderRadius: 7, border: "1px solid #dce8dc", background: "#fff", color: "#7f8c8d", cursor: "pointer", fontSize: 12, fontWeight: 600 }
+    }, "선택 해제"),
+    /*#__PURE__*/React.createElement("span", null, fmt(filtered.length), "건")
+  )), /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#fff",
       borderRadius: 12,
@@ -9742,15 +9816,28 @@ function SpecimenSearchPage({
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1.8fr 1.5fr 2fr 90px 70px 70px",
+      gridTemplateColumns: HAS_STORAGE ? "28px 1.8fr 1.5fr 2fr 90px 70px 70px" : "28px 1.8fr 1.5fr 2fr 70px 70px",
       background: "#f4f8f4",
       padding: "10px 16px",
       fontSize: 12,
       fontWeight: 700,
       color: "#546e7a",
-      gap: 8
+      gap: 8,
+      alignItems: "center"
     }
-  }, /*#__PURE__*/React.createElement("span", null, "관리번호"), /*#__PURE__*/React.createElement("span", null, "생약명 / 국명"), /*#__PURE__*/React.createElement("span", null, "학명"), /*#__PURE__*/React.createElement("span", null, "수장고"), /*#__PURE__*/React.createElement("span", null, "공정서"), /*#__PURE__*/React.createElement("span", null, "등급")), paged.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("input", {
+    type: "checkbox",
+    checked: paged.length > 0 && paged.every(s => checkedIds.has(s[0])),
+    onChange: e => {
+      setCheckedIds(prev => {
+        const next = new Set(prev);
+        if (e.target.checked) paged.forEach(s => next.add(s[0]));
+        else paged.forEach(s => next.delete(s[0]));
+        return next;
+      });
+    },
+    style: { cursor: "pointer" }
+  }), /*#__PURE__*/React.createElement("span", null, "관리번호"), /*#__PURE__*/React.createElement("span", null, "생약명 / 국명"), /*#__PURE__*/React.createElement("span", null, "학명"), HAS_STORAGE && /*#__PURE__*/React.createElement("span", null, "수장고"), /*#__PURE__*/React.createElement("span", null, "공정서"), /*#__PURE__*/React.createElement("span", null, "등급")), paged.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 40,
       textAlign: "center",
@@ -9764,16 +9851,30 @@ function SpecimenSearchPage({
       onClick: () => setSelected(s),
       style: {
         display: "grid",
-        gridTemplateColumns: "1.8fr 1.5fr 2fr 90px 70px 70px",
+        gridTemplateColumns: HAS_STORAGE ? "28px 1.8fr 1.5fr 2fr 90px 70px 70px" : "28px 1.8fr 1.5fr 2fr 70px 70px",
         padding: "10px 16px",
         gap: 8,
+        alignItems: "center",
         cursor: "pointer",
         borderTop: i > 0 ? "1px solid #f0f4f2" : "none",
         transition: "background .15s"
       },
       onMouseEnter: e => e.currentTarget.style.background = "#f8fbf8",
       onMouseLeave: e => e.currentTarget.style.background = "transparent"
-    }, /*#__PURE__*/React.createElement("span", {
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      checked: checkedIds.has(id),
+      onClick: e => e.stopPropagation(),
+      onChange: e => {
+        setCheckedIds(prev => {
+          const next = new Set(prev);
+          if (e.target.checked) next.add(id);
+          else next.delete(id);
+          return next;
+        });
+      },
+      style: { cursor: "pointer" }
+    }), /*#__PURE__*/React.createElement("span", {
       style: {
         fontFamily: "monospace",
         fontSize: 11,
@@ -9796,7 +9897,7 @@ function SpecimenSearchPage({
         fontSize: 12,
         color: "#546e7a"
       }
-    }, sciName?.substring(0, 35), sciName?.length > 35 ? "…" : ""), /*#__PURE__*/React.createElement("span", {
+    }, sciName?.substring(0, 35), sciName?.length > 35 ? "…" : ""), HAS_STORAGE && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 11,
         fontWeight: 600,
@@ -9830,6 +9931,8 @@ function SpecimenSearchPage({
     onChange: setPage
   }), selected && /*#__PURE__*/React.createElement(SpecimenModal, {
     spec: selected,
+    endpoints: EP,
+    hasStorage: HAS_STORAGE,
     onClose: () => setSelected(null),
     onSaved: (newRow) => {
       // 수정된 데이터를 extraSpec에 반영
@@ -11016,9 +11119,18 @@ function SpecimenStatsPage() {
 function SpeciesPage({
   navParams,
   synonyms,
-  reloadSynonyms
+  reloadSynonyms,
+  speciesData,
+  specimens,
+  endpoints,
+  centerLabel,
+  hasStorage
 }) {
-  const sp = window.__SPECIES__;
+  // speciesData/specimens를 넘기지 않으면 기존(제주센터) 전역 데이터를 그대로 사용한다 — 하위 호환.
+  const sp = speciesData || window.__SPECIES__;
+  const CENTER = centerLabel || "제주센터";
+  // hasStorage=false이면 수장고 구분이 없는 센터(예: 옥천센터)라는 뜻으로, 제1/제3수장고 탭을 숨긴다.
+  const HAS_STORAGE = hasStorage !== false;
   const [tab, setTab] = useState(navParams?.tab || "all"); // all | s1 | s3
   const [query, setQuery] = useState("");
   const [familyFilter, setFamilyFilter] = useState("전체");
@@ -11059,7 +11171,7 @@ function SpeciesPage({
     label: "전체",
     count: sp.all.length,
     color: "#1a2e1a"
-  }, {
+  }, ...(HAS_STORAGE ? [{
     id: "s1",
     label: "제1수장고",
     count: sp.s1.length,
@@ -11069,7 +11181,7 @@ function SpeciesPage({
     label: "제3수장고",
     count: sp.s3.length,
     color: "#1a4a7a"
-  }];
+  }] : [])];
   const pharmaLabel = p => p === "미등재" ? "—" : p;
   const pharmaColor = p => p === "KP" ? "#1a4a7a" : p === "KHP" ? "#1a6b3e" : p === "KP, KHP" ? "#7a3d1a" : "#bdc3c7";
   const pharmaBg = p => p === "KP" ? "#e6f1fb" : p === "KHP" ? "#e8f5ee" : p === "KP, KHP" ? "#faeeda" : "transparent";
@@ -11320,6 +11432,9 @@ function SpeciesPage({
     onChange: setPage
   }), selected && /*#__PURE__*/React.createElement(SpeciesModal, {
     species: selected,
+    specimens: specimens,
+    endpoints: endpoints,
+    hasStorage: HAS_STORAGE,
     onClose: () => setSelected(null)
   }), showSynonyms && /*#__PURE__*/React.createElement(Modal, {
     onClose: () => setShowSynonyms(false),
@@ -11347,14 +11462,18 @@ function SpeciesPage({
 }
 function SpeciesModal({
   species: s,
-  onClose
+  onClose,
+  specimens,
+  endpoints,
+  hasStorage
 }) {
   const pharmaColor = s.pharma === "KP" ? "#1a4a7a" : s.pharma === "KHP" ? "#1a6b3e" : s.pharma === "KP, KHP" ? "#7a3d1a" : "#7f8c8d";
   const pharmaBg = s.pharma === "KP" ? "#e6f1fb" : s.pharma === "KHP" ? "#e8f5ee" : s.pharma === "KP, KHP" ? "#faeeda" : "#f4f8f4";
   const [selectedSpec, setSelectedSpec] = useState(null); // 목록에서 클릭한 개별 표본(상세 보기용)
 
-  // 표본 목록: __SPEC__에서 학명 매칭 (전체 조회 — 예전에는 최대 50개로 제한되어 있었음)
-  const specList = (window.__SPEC__ || []).filter(sp => sp[6] && sp[6].trim() === (s.sciName || "").trim());
+  // 표본 목록: 학명 매칭 (전체 조회 — 예전에는 최대 50개로 제한되어 있었음)
+  // specimens를 넘기지 않으면 기존(제주센터) 전역 표본 목록을 그대로 사용한다 — 하위 호환.
+  const specList = (specimens || window.__SPEC__ || []).filter(sp => sp[6] && sp[6].trim() === (s.sciName || "").trim());
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Modal, {
     onClose: onClose
   }, /*#__PURE__*/React.createElement("div", {
@@ -11559,6 +11678,8 @@ function SpeciesModal({
     }, id), cd && /*#__PURE__*/React.createElement("span", null, cd)));
   }))), selectedSpec && /*#__PURE__*/React.createElement(SpecimenModal, {
     spec: selectedSpec,
+    endpoints: endpoints,
+    hasStorage: hasStorage,
     onClose: () => setSelectedSpec(null)
   }));
 }
@@ -12626,6 +12747,123 @@ function JejuCenterPage({ navParams, extraSpec, setExtraSpec, gsLoading, gsError
   );
 }
 
+// ─── 옥천센터 (표본 검색 + 식물종 정보 통합 페이지) ──────────────────────────────
+// "제주센터"와 똑같은 구성이지만, 다른 Supabase 테이블(specimens_okcheon)의 데이터를 사용한다.
+// 제주센터 데이터는 사이트가 열리자마자 App에서 바로 불러오지만, 옥천센터는 아직 방문자가
+// 적을 수 있으므로 이 페이지에 처음 들어올 때만 불러오고(지연 로딩), 그 뒤로는 아래 store에
+// 캐시해두어 다른 페이지로 이동했다가 돌아와도 다시 불러오지 않는다.
+window.__OKCHEON_STORE__ = window.__OKCHEON_STORE__ || {
+  data: null,
+  loading: false,
+  error: null,
+  promise: null,
+  listeners: [],
+};
+function __notifyOkcheonListeners() {
+  window.__OKCHEON_STORE__.listeners.slice().forEach(fn => fn());
+}
+function loadOkcheonSpecimensOnce(force) {
+  const store = window.__OKCHEON_STORE__;
+  if (store.promise && !force) return store.promise;
+  store.loading = true;
+  store.error = null;
+  __notifyOkcheonListeners();
+  store.promise = (async () => {
+    try {
+      const PAGE = 1000;
+      let offset = 0;
+      let all = [];
+      while (true) {
+        const res = await fetch(`/.netlify/functions/get-specimens-okcheon?offset=${offset}&limit=${PAGE}`);
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || "불러오기 실패");
+        all = all.concat(json.data || []);
+        if (!json.hasMore) break;
+        offset += PAGE;
+      }
+      store.data = all;
+      store.error = null;
+    } catch (e) {
+      store.error = "데이터베이스 연결 실패: " + e.message;
+      if (!store.data) store.data = [];
+    } finally {
+      store.loading = false;
+      __notifyOkcheonListeners();
+    }
+  })();
+  return store.promise;
+}
+function useOkcheonSpecimens() {
+  const store = window.__OKCHEON_STORE__;
+  const [, forceRender] = useState(0);
+  useEffect(() => {
+    const listener = () => forceRender(n => n + 1);
+    store.listeners.push(listener);
+    if (!store.promise) loadOkcheonSpecimensOnce();
+    return () => {
+      store.listeners = store.listeners.filter(fn => fn !== listener);
+    };
+  }, []);
+  return {
+    data: store.data,
+    loading: store.loading,
+    error: store.error,
+    reload: () => loadOkcheonSpecimensOnce(true),
+    setData: updater => {
+      store.data = typeof updater === "function" ? updater(store.data) : updater;
+      __notifyOkcheonListeners();
+    },
+  };
+}
+
+const OKCHEON_ENDPOINTS = {
+  save: "/.netlify/functions/save-specimens-okcheon",
+  update: "/.netlify/functions/update-specimen-okcheon",
+  delete: "/.netlify/functions/delete-specimen-okcheon",
+};
+
+function OkcheonCenterPage({ navParams, synonyms, reloadSynonyms }) {
+  const [subTab, setSubTab] = useState(navParams?.subTab || "specimen"); // specimen | species
+  useEffect(() => {
+    if (navParams?.subTab) setSubTab(navParams.subTab);
+  }, [navParams]);
+
+  const { data: extraSpec, loading: gsLoading, error: gsError, reload: reloadSpecimens, setData: setExtraSpec } = useOkcheonSpecimens();
+
+  // 옥천센터 표본 데이터를 기준으로 식물종 정보를 그때그때 계산한다(제주센터와 동일한 계산 로직 재사용).
+  const speciesData = useMemo(
+    () => computeSpeciesFromSpecimens(extraSpec || [], window.__PHARMA__),
+    [extraSpec]
+  );
+
+  return /*#__PURE__*/React.createElement("div", null,
+    React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 18 } },
+      [{ id: "specimen", label: "🌱 표본 검색" }, { id: "species", label: "🌿 식물종 정보" }].map(t => React.createElement("button", {
+        key: t.id,
+        onClick: () => setSubTab(t.id),
+        style: {
+          padding: "9px 18px",
+          borderRadius: 9,
+          border: `1px solid ${subTab === t.id ? "#1a6b3e" : "#dce8dc"}`,
+          background: subTab === t.id ? "#1a6b3e" : "#fff",
+          color: subTab === t.id ? "#fff" : "#546e7a",
+          cursor: "pointer",
+          fontSize: 13.5,
+          fontWeight: 700
+        }
+      }, t.label))
+    ),
+    subTab === "specimen" && React.createElement(SpecimenSearchPage, {
+      navParams, extraSpec, setExtraSpec, gsLoading, gsError, reloadSpecimens,
+      endpoints: OKCHEON_ENDPOINTS, centerLabel: "옥천센터", hasStorage: false
+    }),
+    subTab === "species" && React.createElement(SpeciesPage, {
+      navParams, synonyms, reloadSynonyms,
+      speciesData, specimens: extraSpec, endpoints: OKCHEON_ENDPOINTS, centerLabel: "옥천센터", hasStorage: false
+    })
+  );
+}
+
 // ─── 통계 (공정서 통계 + 표본 통계 통합 페이지) ─────────────────────────────────
 function StatsPage({ navParams }) {
   const [subTab, setSubTab] = useState(navParams?.subTab || "pharma"); // pharma | specimen
@@ -12770,6 +13008,9 @@ function App() {
   }, {
     id: "jeju-center",
     label: "제주센터"
+  }, {
+    id: "okcheon-center",
+    label: "옥천센터"
   }, {
     id: "map",
     label: "🗺 생약 지도"
@@ -12959,6 +13200,10 @@ function App() {
     gsLoading: specimensLoading,
     gsError: specimensError,
     reloadSpecimens: loadAllSpecimens,
+    synonyms: synonyms,
+    reloadSynonyms: loadSynonyms
+  }), page === "okcheon-center" && /*#__PURE__*/React.createElement(OkcheonCenterPage, {
+    navParams: navParams,
     synonyms: synonyms,
     reloadSynonyms: loadSynonyms
   }), page === "map" && /*#__PURE__*/React.createElement(MapPage, {
