@@ -15,10 +15,6 @@ function httpsRequest(method, url, headers, body) {
       headers: buf ? { ...headers, "Content-Length": buf.length } : headers,
     };
     const req = https.request(options, (res) => {
-      // 응답을 문자열로 바로 이어붙이면(chunk가 Buffer→string으로 암묵 변환되면서)
-      // 한글처럼 UTF-8에서 여러 바이트로 구성되는 문자가 네트워크 청크 경계에서
-      // 끊겨 깨질 수 있습니다. 반드시 Buffer 상태로 모두 모은 뒤,
-      // 끝에서 한 번만 UTF-8 문자열로 변환해야 합니다.
       const chunks = [];
       res.on("data", chunk => chunks.push(chunk));
       res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
@@ -30,7 +26,8 @@ function httpsRequest(method, url, headers, body) {
 }
 
 // 관리자 활동 이력을 activity_log 테이블에 남긴다. 실패해도 삭제 자체는 이미 끝난 뒤이므로 조용히 무시.
-async function logActivity(action, specId, specName, detail) {
+// beforeData: 삭제되기 전 행 전체(되돌리기용 스냅샷).
+async function logActivity(action, specId, specName, detail, beforeData) {
   try {
     await httpsRequest(
       "POST",
@@ -41,7 +38,7 @@ async function logActivity(action, specId, specName, detail) {
         "Content-Type": "application/json",
         "Prefer": "return=minimal",
       },
-      JSON.stringify([{ action, spec_id: specId || null, spec_name: specName || null, detail: detail || null }])
+      JSON.stringify([{ action, spec_id: specId || null, spec_name: specName || null, detail: detail || null, before_data: beforeData !== undefined ? beforeData : null, site: "jeju" }])
     );
   } catch (e) {
     // 이력 기록 실패는 무시
@@ -86,6 +83,27 @@ exports.handler = async function(event, context) {
     }
 
     const encodedId = encodeURIComponent(id);
+    const headers = {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Accept": "application/json",
+    };
+
+    // 되돌리기(undo)를 지원하기 위해, 삭제하기 전 행 전체를 먼저 조회해 스냅샷으로 남긴다.
+    let beforeRow = null;
+    try {
+      const beforeRes = await httpsRequest(
+        "GET",
+        `${SUPABASE_URL}/rest/v1/specimens?관리번호=eq.${encodedId}&select=*`,
+        headers,
+        null
+      );
+      const beforeRows = JSON.parse(beforeRes.body);
+      if (Array.isArray(beforeRows) && beforeRows.length > 0) beforeRow = beforeRows[0];
+    } catch (e) {
+      // 이전 값 조회 실패해도 삭제 자체는 계속 진행 (되돌리기만 불가능해짐)
+    }
+
     const result = await httpsRequest(
       "DELETE",
       `${SUPABASE_URL}/rest/v1/specimens?관리번호=eq.${encodedId}`,
@@ -101,7 +119,7 @@ exports.handler = async function(event, context) {
       throw new Error(`Supabase 오류 (${result.status}): ${result.body.substring(0, 200)}`);
     }
 
-    await logActivity("delete", id, parsed["표본번호"] || "", "표본 삭제");
+    await logActivity("delete", id, parsed["표본번호"] || (beforeRow ? beforeRow["표본번호"] : ""), "표본 삭제", beforeRow);
 
     return {
       statusCode: 200,
