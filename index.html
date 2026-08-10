@@ -10363,59 +10363,32 @@ function LegendItem({
 }
 
 // ─── 홈 페이지 ───────────────────────────────────────────────────────────────
-function HomePage({
-  onNav,
-  specimensLoading,
-  specimensProgress
-}) {
-  const s = window.__STATS__.summary;
-  const st = window.__STATS__;
+// 대시보드에서 센터 하나(제주 또는 옥천)의 통계를 보여주는 부분.
+// 두 센터의 데이터를 합치지 않고 각각 따로 보여주기 위해, HomePage에서 탭으로 어느 센터의
+// stats를 넘길지만 바꿔주고 이 컴포넌트는 그 stats만 가지고 그린다.
+function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, loading, progress }) {
+  const s = stats.summary;
+  const st = stats;
+  const HAS_STORAGE = hasStorage !== false;
   const [pharmaMode, setPharmaMode] = useState("incl"); // "incl" 동속 근연 포함 | "excl" 동속 근연 제외
   const specimenPharmView = pharmaMode === "incl" ? s.specimenPharm : s.specimenPharmExcl;
   const speciesPharmView = pharmaMode === "incl" ? s.speciesPharm : s.speciesPharmExcl;
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
-    style: {
-      background: "linear-gradient(135deg,#0f3d22,#1a6b3e)",
-      borderRadius: 18,
-      padding: "32px 32px 28px",
-      color: "#fff",
-      marginBottom: 24
-    }
-  }, /*#__PURE__*/React.createElement("div", {
-    style: {
-      fontSize: 11,
-      letterSpacing: 2,
-      opacity: 0.7,
-      marginBottom: 6,
-      textTransform: "uppercase"
-    }
-  }, "HERBARIUM OF KOREA HERBAL MEDICINE RESOURCES"), /*#__PURE__*/React.createElement("h1", {
-    style: {
-      margin: "0 0 8px",
-      fontSize: 26,
-      fontWeight: 900,
-      letterSpacing: -0.3
-    }
-  }, "총괄 현황 대시보드"), /*#__PURE__*/React.createElement("p", {
-    style: {
-      margin: 0,
-      opacity: 0.8,
-      fontSize: 13,
-      lineHeight: 1.6
-    }
-  }, "국립생약자원관 제주 센터 수장·관리 생약자원 표본 및 공정서 등재 현황"), specimensLoading && /*#__PURE__*/React.createElement("div", {
-    style: {
-      marginTop: 14,
-      display: "inline-flex",
-      alignItems: "center",
-      gap: 8,
-      background: "rgba(255,255,255,0.15)",
-      borderRadius: 20,
-      padding: "6px 14px",
-      fontSize: 12,
-      fontWeight: 700
-    }
-  }, "⏳ 표본 데이터 불러오는 중", specimensProgress?.total ? ` (${fmt(specimensProgress.loaded)} / ${fmt(specimensProgress.total)}건)` : "", " · 완료되면 아래 수치가 자동으로 갱신됩니다")), /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", null,
+    loading && /*#__PURE__*/React.createElement("div", {
+      style: {
+        marginBottom: 14,
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        background: "#eef6f0",
+        borderRadius: 20,
+        padding: "6px 14px",
+        fontSize: 12,
+        fontWeight: 700,
+        color: "#1a6b3e"
+      }
+    }, "⏳ ", centerLabel, " 표본 데이터 불러오는 중", progress?.total ? ` (${fmt(progress.loaded)} / ${fmt(progress.total)}건)` : "", " · 완료되면 아래 수치가 자동으로 갱신됩니다"),
+    /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit,minmax(155px,1fr))",
@@ -10425,15 +10398,15 @@ function HomePage({
   }, /*#__PURE__*/React.createElement(StatCard, {
     label: "총 표본 수",
     value: `${fmt(s.specimens.total)}점`,
-    sub: "제주센터 전체",
+    sub: `${centerLabel} 전체`,
     accent: "#1a6b3e",
-    onClick: () => onNav("jeju-center", { subTab: "specimen" })
+    onClick: () => onNav(navPrefix, { subTab: "specimen" })
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "총 식물종 수",
     value: `${fmt(s.specimens.species)}종`,
-    sub: "제주센터 전체",
+    sub: `${centerLabel} 전체`,
     accent: "#1a6b3e",
-    onClick: () => onNav("jeju-center", { subTab: "species", tab: "all" })
+    onClick: () => onNav(navPrefix, { subTab: "species", tab: "all" })
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "공정서 식물류 생약",
     value: `${fmt(s.pharmacopoeia.total)}종`,
@@ -10446,18 +10419,18 @@ function HomePage({
     sub: "버섯 8종 포함",
     accent: "#2563a6",
     onClick: () => onNav("stats", { subTab: "pharma" })
-  }), /*#__PURE__*/React.createElement(StatCard, {
+  }), HAS_STORAGE && /*#__PURE__*/React.createElement(StatCard, {
     label: "제1수장고 표본",
     value: `${fmt(st.storage1.total)}점`,
     sub: `${fmt(s.storage1.species)} 기원종`,
     accent: "#2d9c63",
-    onClick: () => onNav("jeju-center", { subTab: "specimen", storage: "1수장고" })
-  }), /*#__PURE__*/React.createElement(StatCard, {
+    onClick: () => onNav(navPrefix, { subTab: "specimen", storage: "1수장고" })
+  }), HAS_STORAGE && /*#__PURE__*/React.createElement(StatCard, {
     label: "제3수장고 표본",
     value: `${fmt(st.storage3.total)}점`,
     sub: `${fmt(s.storage3.species)} 기원종`,
     accent: "#1a4a7a",
-    onClick: () => onNav("jeju-center", { subTab: "specimen", storage: "3수장고" })
+    onClick: () => onNav(navPrefix, { subTab: "specimen", storage: "3수장고" })
   })), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -10514,23 +10487,23 @@ function HomePage({
     color: "#1a6b3e",
     label: "공정서 등재",
     value: `${fmt(specimenPharmView.both)}점 (${specimenPharmView.bothPct}%)`,
-    onClick: () => onNav("jeju-center", { subTab: "specimen", pharma: "등재" })
+    onClick: () => onNav(navPrefix, { subTab: "specimen", pharma: "등재" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#4bbf84",
     label: "KP 등재",
     value: `${fmt(specimenPharmView.kp)}점`,
-    onClick: () => onNav("jeju-center", { subTab: "specimen", pharma: "KP" })
+    onClick: () => onNav(navPrefix, { subTab: "specimen", pharma: "KP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#78d4a4",
     label: "KHP 등재",
     value: `${fmt(specimenPharmView.khp)}점`,
-    onClick: () => onNav("jeju-center", { subTab: "specimen", pharma: "KHP" })
+    onClick: () => onNav(navPrefix, { subTab: "specimen", pharma: "KHP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미등재",
     value: `${fmt(specimenPharmView.none)}점`,
     border: true,
-    onClick: () => onNav("jeju-center", { subTab: "specimen", pharma: "미등재" })
+    onClick: () => onNav(navPrefix, { subTab: "specimen", pharma: "미등재" })
   })))), /*#__PURE__*/React.createElement(Section, {
     title: `식물종 공정서 등재율 (${fmt(s.specimens.species)}종)`
   }, /*#__PURE__*/React.createElement("div", {
@@ -10555,25 +10528,25 @@ function HomePage({
     color: "#2563a6",
     label: "공정서 등재",
     value: `${fmt(speciesPharmView.both)}종 (${speciesPharmView.bothPct}%)`,
-    onClick: () => onNav("jeju-center", { subTab: "species", pharma: "등재" })
+    onClick: () => onNav(navPrefix, { subTab: "species", pharma: "등재" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#3d87cf",
     label: "KP 등재",
     value: `${fmt(speciesPharmView.kp)}종`,
-    onClick: () => onNav("jeju-center", { subTab: "species", pharma: "KP" })
+    onClick: () => onNav(navPrefix, { subTab: "species", pharma: "KP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#6aaae0",
     label: "KHP 등재",
     value: `${fmt(speciesPharmView.khp)}종`,
-    onClick: () => onNav("jeju-center", { subTab: "species", pharma: "KHP" })
+    onClick: () => onNav(navPrefix, { subTab: "species", pharma: "KHP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미등재",
     value: `${fmt(speciesPharmView.none)}종`,
     border: true,
-    onClick: () => onNav("jeju-center", { subTab: "species", pharma: "미등재" })
+    onClick: () => onNav(navPrefix, { subTab: "species", pharma: "미등재" })
   }))))), /*#__PURE__*/React.createElement(Section, {
-    title: `공정서 기원종 ${fmt(s.originCoverage.total)}종 중 제주센터 보유율`,
+    title: `공정서 기원종 ${fmt(s.originCoverage.total)}종 중 ${centerLabel} 보유율`,
     style: {
       marginBottom: 24
     }
@@ -10619,7 +10592,88 @@ function HomePage({
     style: {
       color: "#e67e22"
     }
-  }, `${fmt(s.originCoverage.covered)}종(${s.originCoverage.coveredPct}%)`), `을 표본으로 보유. 나머지 ${fmt(s.originCoverage.notCovered)}종 추가 수집 진행 중.`))), /*#__PURE__*/React.createElement("h3", {
+  }, `${fmt(s.originCoverage.covered)}종(${s.originCoverage.coveredPct}%)`), `을 표본으로 보유. 나머지 ${fmt(s.originCoverage.notCovered)}종 추가 수집 진행 중.`)))
+  );
+}
+
+function HomePage({
+  onNav,
+  specimensLoading,
+  specimensProgress,
+  synonyms
+}) {
+  const [center, setCenter] = useState("jeju"); // jeju | okcheon — 두 센터 데이터는 합치지 않고 탭으로 나눠서 보여준다
+  const { data: okcheonSpecimens, loading: okcheonLoading } = useOkcheonSpecimens();
+  const okcheonStats = useMemo(
+    () => computeStatsFromSpecimens(okcheonSpecimens || [], window.__PHARMA__, synonyms || []),
+    [okcheonSpecimens, synonyms]
+  );
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "linear-gradient(135deg,#0f3d22,#1a6b3e)",
+      borderRadius: 18,
+      padding: "32px 32px 28px",
+      color: "#fff",
+      marginBottom: 24
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      letterSpacing: 2,
+      opacity: 0.7,
+      marginBottom: 6,
+      textTransform: "uppercase"
+    }
+  }, "HERBARIUM OF KOREA HERBAL MEDICINE RESOURCES"), /*#__PURE__*/React.createElement("h1", {
+    style: {
+      margin: "0 0 8px",
+      fontSize: 26,
+      fontWeight: 900,
+      letterSpacing: -0.3
+    }
+  }, "총괄 현황 대시보드"), /*#__PURE__*/React.createElement("p", {
+    style: {
+      margin: 0,
+      opacity: 0.8,
+      fontSize: 13,
+      lineHeight: 1.6
+    }
+  }, "국립생약자원관 수장·관리 생약자원 표본 및 공정서 등재 현황 — 센터별로 나누어 확인할 수 있습니다.")),
+  /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: 8, marginBottom: 18 }
+  }, [{ id: "jeju", label: "🌱 제주센터" }, { id: "okcheon", label: "🌿 옥천센터" }].map(c => /*#__PURE__*/React.createElement("button", {
+    key: c.id,
+    onClick: () => setCenter(c.id),
+    style: {
+      padding: "9px 18px",
+      borderRadius: 9,
+      border: `1px solid ${center === c.id ? "#1a6b3e" : "#dce8dc"}`,
+      background: center === c.id ? "#1a6b3e" : "#fff",
+      color: center === c.id ? "#fff" : "#546e7a",
+      cursor: "pointer",
+      fontSize: 13.5,
+      fontWeight: 700
+    }
+  }, c.label))),
+  center === "jeju" && /*#__PURE__*/React.createElement(CenterOverview, {
+    stats: window.__STATS__,
+    hasStorage: true,
+    centerLabel: "제주센터",
+    navPrefix: "jeju-center",
+    onNav: onNav,
+    loading: specimensLoading,
+    progress: specimensProgress
+  }),
+  center === "okcheon" && /*#__PURE__*/React.createElement(CenterOverview, {
+    stats: okcheonStats,
+    hasStorage: false,
+    centerLabel: "옥천센터",
+    navPrefix: "okcheon-center",
+    onNav: onNav,
+    loading: okcheonLoading,
+    progress: null
+  }),
+  /*#__PURE__*/React.createElement("h3", {
     style: {
       fontSize: 15,
       fontWeight: 700,
@@ -10636,24 +10690,32 @@ function HomePage({
     id: "pharma-search",
     icon: "📋",
     title: "공정서 생약 검색",
-    desc: `KP·KHP 등재 ${fmt(s.pharmacopoeia.total)}종 생약 전체 검색 및 기원종 상세 조회`,
-    stats: [`${fmt(s.pharmacopoeia.total)}종 생약`, `${fmt(s.pharmacopoeia.origins)}개 기원종`],
+    desc: "KP·KHP 등재 생약 전체 검색 및 기원종 상세 조회",
+    stats: [`${fmt(window.__STATS__.summary.pharmacopoeia.total)}종 생약`, `${fmt(window.__STATS__.summary.pharmacopoeia.origins)}개 기원종`],
     color: "#2563a6",
     navTo: ["pharma-search"]
   }, {
     id: "jeju-center",
     icon: "🌱",
     title: "제주센터",
-    desc: `전체 ${fmt(s.specimens.total)}점 표본 검색 및 ${fmt(s.specimens.species)}종 식물종(기원종) 정보 조회`,
-    stats: [`${fmt(s.specimens.total)}점 표본`, `${fmt(s.specimens.species)}종 식물종`],
+    desc: `전체 ${fmt(window.__STATS__.summary.specimens.total)}점 표본 검색 및 ${fmt(window.__STATS__.summary.specimens.species)}종 식물종(기원종) 정보 조회`,
+    stats: [`${fmt(window.__STATS__.summary.specimens.total)}점 표본`, `${fmt(window.__STATS__.summary.specimens.species)}종 식물종`],
     color: "#1a6b3e",
     navTo: ["jeju-center", { subTab: "specimen" }]
+  }, {
+    id: "okcheon-center",
+    icon: "🌿",
+    title: "옥천센터",
+    desc: `전체 ${fmt(okcheonStats.summary.specimens.total)}점 표본 검색 및 ${fmt(okcheonStats.summary.specimens.species)}종 식물종(기원종) 정보 조회`,
+    stats: [`${fmt(okcheonStats.summary.specimens.total)}점 표본`, `${fmt(okcheonStats.summary.specimens.species)}종 식물종`],
+    color: "#2d9c63",
+    navTo: ["okcheon-center", { subTab: "specimen" }]
   }, {
     id: "map",
     icon: "🗺",
     title: "생약 위치 지도",
-    desc: `${fmt(s.map.points)}점 표본의 GPS 좌표를 지도에 표시 — 마커 클릭으로 표본 조회`,
-    stats: [`${fmt(s.map.locations)}개 위치`, `${fmt(s.map.points)}점 매핑`],
+    desc: `${fmt(window.__STATS__.summary.map.points)}점 표본의 GPS 좌표를 지도에 표시 — 마커 클릭으로 표본 조회`,
+    stats: [`${fmt(window.__STATS__.summary.map.locations)}개 위치`, `${fmt(window.__STATS__.summary.map.points)}점 매핑`],
     color: "#7a3d1a",
     navTo: ["map"]
   }, {
@@ -10661,7 +10723,7 @@ function HomePage({
     icon: "📊",
     title: "통계",
     desc: "공정서 등재 현황, 과별·약용부위별 분포 및 표본 현황(수장고별, 중요도) 통계",
-    stats: [`공정서 기원종 ${fmt(s.pharmacopoeia.origins)}종`, `표본 ${fmt(s.specimens.total)}점`],
+    stats: [`공정서 기원종 ${fmt(window.__STATS__.summary.pharmacopoeia.origins)}종`, `표본 ${fmt(window.__STATS__.summary.specimens.total)}점`],
     color: "#2563a6",
     navTo: ["stats", { subTab: "pharma" }]
   }].map(c => /*#__PURE__*/React.createElement(NavCard, {
@@ -12625,12 +12687,13 @@ function AdminLoginModal({ onClose, onSuccess }) {
 }
 
 // ─── 관리자 변경 이력 모달 ─────────────────────────────────────────────────────
-function ActivityLogModal({ onClose }) {
+function ActivityLogModal({ onClose, onReverted }) {
   const [entries, setEntries] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(false);
+  const [revertingId, setRevertingId] = useState(null);
   const PAGE = 100;
 
   const load = async (nextOffset) => {
@@ -12656,8 +12719,9 @@ function ActivityLogModal({ onClose }) {
 
   useEffect(() => { load(0); }, []);
 
-  const actionLabel = a => a === "upload" ? "⬆ 업로드" : a === "update" ? "✏️ 수정" : a === "delete" ? "🗑 삭제" : a;
-  const actionColor = a => a === "upload" ? "#1a6b3e" : a === "update" ? "#2563a6" : a === "delete" ? "#c0392b" : "#546e7a";
+  const actionLabel = a => a === "upload" ? "⬆ 업로드" : a === "update" ? "✏️ 수정" : a === "delete" ? "🗑 삭제" : a === "revert" ? "↩ 되돌림" : a;
+  const actionColor = a => a === "upload" ? "#1a6b3e" : a === "update" ? "#2563a6" : a === "delete" ? "#c0392b" : a === "revert" ? "#7a3d1a" : "#546e7a";
+  const siteLabel = s => s === "okcheon" ? "옥천" : "제주";
 
   const fmtDate = iso => {
     try {
@@ -12666,7 +12730,30 @@ function ActivityLogModal({ onClose }) {
     } catch (e) { return iso; }
   };
 
-  return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: 760 },
+  const handleRevert = async (entry) => {
+    if (!confirm(`이 이력을 되돌릴까요?\n\n${actionLabel(entry.action)} · ${entry.spec_id || ""} · ${entry.detail || ""}`)) return;
+    setRevertingId(entry.id);
+    try {
+      const res = await fetch("/.netlify/functions/revert-activity", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: ADMIN_PASSWORD, id: entry.id }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "되돌리기 실패");
+      // 목록을 처음부터 다시 불러와 되돌림 표시 및 새로 추가된 "되돌림" 기록을 반영
+      setOffset(0);
+      await load(0);
+      // 표본 목록 캐시도 갱신하도록 상위(App)에 알림 (해당 센터 데이터를 다시 불러옴)
+      if (onReverted) onReverted(entry.site || "jeju");
+    } catch (e) {
+      alert("되돌리기 실패: " + e.message);
+    } finally {
+      setRevertingId(null);
+    }
+  };
+
+  return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: 860 },
     React.createElement("div", { style: { padding: 28 } },
       React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
         React.createElement("div", { style: { fontSize: 17, fontWeight: 700, color: "#1a2e1a" } }, "🗂 표본 데이터 변경 이력"),
@@ -12675,7 +12762,7 @@ function ActivityLogModal({ onClose }) {
           style: { background: "#f4f8f4", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#546e7a" }
         }, "✕")
       ),
-      React.createElement("div", { style: { fontSize: 12.5, color: "#7f8c8d", marginBottom: 16 } }, "표본 업로드·수정·삭제 기록을 최근 순으로 보여줍니다."),
+      React.createElement("div", { style: { fontSize: 12.5, color: "#7f8c8d", marginBottom: 16 } }, "표본 업로드·수정·삭제 기록을 최근 순으로 보여줍니다. 되돌리기 정보가 있는 기록은 \"되돌리기\" 버튼으로 바로 되돌릴 수 있습니다."),
       error && React.createElement("div", { style: { fontSize: 12.5, color: "#c0392b", padding: "10px 0" } }, "⚠ " + error),
       !error && entries === null && React.createElement("div", { style: { fontSize: 13, color: "#95a5a6", padding: "20px 0", textAlign: "center" } }, "불러오는 중..."),
       !error && entries && entries.length === 0 && React.createElement("div", { style: { fontSize: 13, color: "#bdc3c7", padding: "20px 0", textAlign: "center" } }, "기록이 없습니다."),
@@ -12683,21 +12770,33 @@ function ActivityLogModal({ onClose }) {
         React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 12.5 } },
           React.createElement("thead", null,
             React.createElement("tr", { style: { background: "#f8fafb", position: "sticky", top: 0 } },
-              ["시각", "작업", "관리번호", "내용"].map(h => React.createElement("th", {
+              ["시각", "센터", "작업", "관리번호", "내용", ""].map(h => React.createElement("th", {
                 key: h,
                 style: { textAlign: "left", padding: "9px 12px", color: "#7f8c8d", fontWeight: 600, borderBottom: "1px solid #eef2f5" }
               }, h))
             )
           ),
           React.createElement("tbody", null,
-            entries.map((e, i) => React.createElement("tr", { key: e.id || i, style: { borderBottom: "1px solid #f4f8f5" } },
-              React.createElement("td", { style: { padding: "8px 12px", color: "#546e7a", whiteSpace: "nowrap" } }, fmtDate(e.created_at)),
-              React.createElement("td", { style: { padding: "8px 12px" } },
-                React.createElement("span", { style: { color: actionColor(e.action), fontWeight: 700 } }, actionLabel(e.action))
-              ),
-              React.createElement("td", { style: { padding: "8px 12px", fontFamily: "monospace", color: "#1a2e1a" } }, e.spec_id || "—"),
-              React.createElement("td", { style: { padding: "8px 12px", color: "#546e7a" } }, e.detail || "")
-            ))
+            entries.map((e, i) => {
+              const canRevert = !e.reverted && e.action !== "revert" && e.before_data !== null && e.before_data !== undefined;
+              return React.createElement("tr", { key: e.id || i, style: { borderBottom: "1px solid #f4f8f5" } },
+                React.createElement("td", { style: { padding: "8px 12px", color: "#546e7a", whiteSpace: "nowrap" } }, fmtDate(e.created_at)),
+                React.createElement("td", { style: { padding: "8px 12px", color: "#7f8c8d" } }, siteLabel(e.site)),
+                React.createElement("td", { style: { padding: "8px 12px" } },
+                  React.createElement("span", { style: { color: actionColor(e.action), fontWeight: 700 } }, actionLabel(e.action)),
+                  e.reverted && React.createElement("span", { style: { marginLeft: 6, fontSize: 11, color: "#95a5a6" } }, "(되돌림)")
+                ),
+                React.createElement("td", { style: { padding: "8px 12px", fontFamily: "monospace", color: "#1a2e1a" } }, e.spec_id || "—"),
+                React.createElement("td", { style: { padding: "8px 12px", color: "#546e7a" } }, e.detail || ""),
+                React.createElement("td", { style: { padding: "8px 12px" } },
+                  canRevert && React.createElement("button", {
+                    onClick: () => handleRevert(e),
+                    disabled: revertingId === e.id,
+                    style: { padding: "4px 10px", borderRadius: 6, border: "1px solid #7a3d1a", background: "#fdf3ea", color: "#7a3d1a", cursor: revertingId === e.id ? "default" : "pointer", fontSize: 11.5, fontWeight: 600, whiteSpace: "nowrap" }
+                  }, revertingId === e.id ? "되돌리는 중..." : "↩ 되돌리기")
+                )
+              );
+            })
           )
         )
       ),
@@ -13190,7 +13289,8 @@ function App() {
   }, page === "home" && /*#__PURE__*/React.createElement(HomePage, {
     onNav: nav,
     specimensLoading: specimensLoading,
-    specimensProgress: specimensProgress
+    specimensProgress: specimensProgress,
+    synonyms: synonyms
   }), page === "pharma-search" && /*#__PURE__*/React.createElement(PharmaSearchPage, {
     navParams: navParams
   }), page === "jeju-center" && /*#__PURE__*/React.createElement(JejuCenterPage, {
@@ -13224,7 +13324,11 @@ function App() {
     onClose: () => setShowAdminLogin(false),
     onSuccess: () => setIsAdmin(true)
   }), showHistory && /*#__PURE__*/React.createElement(ActivityLogModal, {
-    onClose: () => setShowHistory(false)
+    onClose: () => setShowHistory(false),
+    onReverted: (site) => {
+      if (site === "okcheon") loadOkcheonSpecimensOnce(true);
+      else loadAllSpecimens();
+    }
   }));
 }
 const root = ReactDOM.createRoot(document.getElementById('root'));
