@@ -15,16 +15,31 @@ function httpsPatch(url, headers, body) {
       headers: { ...headers, "Content-Length": buf.length },
     };
     const req = https.request(options, (res) => {
-      // 응답을 문자열로 바로 이어붙이면(chunk가 Buffer→string으로 암묵 변환되면서)
-      // 한글처럼 UTF-8에서 여러 바이트로 구성되는 문자가 네트워크 청크 경계에서
-      // 끊겨 깨질 수 있습니다. 반드시 Buffer 상태로 모두 모은 뒤,
-      // 끝에서 한 번만 UTF-8 문자열로 변환해야 합니다.
       const chunks = [];
       res.on("data", chunk => chunks.push(chunk));
       res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
     });
     req.on("error", reject);
     req.write(buf);
+    req.end();
+  });
+}
+
+function httpsGet(url, headers) {
+  return new Promise((resolve, reject) => {
+    const urlObj = new URL(url);
+    const options = {
+      hostname: urlObj.hostname,
+      path: urlObj.pathname + urlObj.search,
+      method: "GET",
+      headers,
+    };
+    const req = https.request(options, (res) => {
+      const chunks = [];
+      res.on("data", chunk => chunks.push(chunk));
+      res.on("end", () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    req.on("error", reject);
     req.end();
   });
 }
@@ -51,7 +66,8 @@ function httpsPost(url, headers, body) {
 }
 
 // 관리자 활동 이력을 activity_log 테이블에 남긴다. 실패해도 원래 작업에는 영향 없음.
-async function logActivity(action, specId, specName, detail) {
+// beforeData: 수정 전 값(되돌리기용 스냅샷). 원본 행이 없었으면 null.
+async function logActivity(action, specId, specName, detail, beforeData) {
   try {
     await httpsPost(
       `${SUPABASE_URL}/rest/v1/activity_log`,
@@ -61,7 +77,7 @@ async function logActivity(action, specId, specName, detail) {
         "Content-Type": "application/json",
         "Prefer": "return=minimal",
       },
-      JSON.stringify([{ action, spec_id: specId || null, spec_name: specName || null, detail: detail || null }])
+      JSON.stringify([{ action, spec_id: specId || null, spec_name: specName || null, detail: detail || null, before_data: beforeData !== undefined ? beforeData : null, site: "jeju" }])
     );
   } catch (e) {
     // 이력 기록 실패는 무시
@@ -125,8 +141,27 @@ exports.handler = async function(event, context) {
       "과제명":   row[14] || "",
     };
 
-    // Supabase PATCH (관리번호 기준 업데이트)
     const encodedId = encodeURIComponent(id);
+    const headers = {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Accept": "application/json",
+    };
+
+    // 되돌리기(undo)를 지원하기 위해, 수정하기 전 값을 먼저 조회해 스냅샷으로 남긴다.
+    let beforeRow = null;
+    try {
+      const beforeRes = await httpsGet(
+        `${SUPABASE_URL}/rest/v1/specimens?관리번호=eq.${encodedId}&select=*`,
+        headers
+      );
+      const beforeRows = JSON.parse(beforeRes.body);
+      if (Array.isArray(beforeRows) && beforeRows.length > 0) beforeRow = beforeRows[0];
+    } catch (e) {
+      // 이전 값 조회 실패해도 수정 자체는 계속 진행 (되돌리기만 불가능해짐)
+    }
+
+    // Supabase PATCH (관리번호 기준 업데이트)
     const result = await httpsPatch(
       `${SUPABASE_URL}/rest/v1/specimens?관리번호=eq.${encodedId}`,
       {
@@ -142,7 +177,7 @@ exports.handler = async function(event, context) {
       throw new Error(`Supabase 오류 (${result.status}): ${result.body.substring(0, 200)}`);
     }
 
-    await logActivity("update", id, record["표본번호"] || "", "표본 정보 수정");
+    await logActivity("update", id, record["표본번호"] || "", "표본 정보 수정", beforeRow);
 
     return {
       statusCode: 200,
