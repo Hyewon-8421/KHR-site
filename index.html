@@ -35,11 +35,6 @@ const {
   useMemo
 } = React;
 
-// ─── Supabase 연동 (표본 DB + 표본 스캔 사진 저장소) ─────────────────────────
-const SUPABASE_URL = "https://rfyovtepspyseidktiea.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_UU8vDCtULeR9XBb-wDgP0g_Ef7eDncE";
-const PHOTO_BUCKET = "specimen-photos"; // Supabase Storage에 미리 생성해두어야 함 (public 버킷)
-
 // ─── 관리자 인증 ──────────────────────────────────────────────────────────
 // Netlify Functions(save-specimens/update-specimen/delete-specimen)이 요구하는
 // apiKey와 동일한 값을 관리자 비밀번호로 사용한다. 로그인에 성공하면
@@ -13009,6 +13004,98 @@ function StatsPage({ navParams, synonyms }) {
   );
 }
 
+// ─── Supabase → Cloudinary 사진 이전 모달 ──────────────────────────────────────
+// Supabase Storage에 예전에 올려둔 표본 사진들을 Cloudinary로 복사해온다.
+// 원본(Supabase)은 건드리지 않고 그대로 두며, 여러 번 실행해도 안전하도록
+// 작은 배치(기본 10개)로 나누어 순차 처리한다.
+function PhotoMigrationModal({ onClose }) {
+  const [running, setRunning] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(null);
+  const [migrated, setMigrated] = useState(0);
+  const [skipped, setSkipped] = useState(0);
+  const [failed, setFailed] = useState(0);
+  const [log, setLog] = useState([]);
+  const [error, setError] = useState(null);
+  const [done, setDone] = useState(false);
+
+  const runBatch = async (currentOffset) => {
+    try {
+      const res = await fetch("/.netlify/functions/migrate-photos-to-cloudinary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: ADMIN_PASSWORD, offset: currentOffset, limit: 10 }),
+      });
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "이전 실패");
+      setTotal(json.total);
+      const newMigrated = json.results.filter(r => r.status === "migrated").length;
+      const newSkipped = json.results.filter(r => r.status === "skipped").length;
+      const newFailed = json.results.filter(r => r.status === "failed").length;
+      setMigrated(m => m + newMigrated);
+      setSkipped(s => s + newSkipped);
+      setFailed(f => f + newFailed);
+      setLog(prev => [...prev, ...json.results]);
+      const nextOffset = currentOffset + json.processed;
+      setOffset(nextOffset);
+      if (json.hasMore && json.processed > 0) {
+        await runBatch(nextOffset);
+      } else {
+        setRunning(false);
+        setDone(true);
+      }
+    } catch (e) {
+      setError(e.message);
+      setRunning(false);
+    }
+  };
+
+  const start = () => {
+    setRunning(true);
+    setError(null);
+    setDone(false);
+    runBatch(offset);
+  };
+
+  const pct = total ? Math.round((offset / total) * 100) : 0;
+
+  return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: 640 },
+    React.createElement("div", { style: { padding: 28 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+        React.createElement("div", { style: { fontSize: 17, fontWeight: 700, color: "#1a2e1a" } }, "📦 Supabase → Cloudinary 사진 이전"),
+        React.createElement("button", {
+          onClick: onClose,
+          style: { background: "#f4f8f4", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#546e7a" }
+        }, "✕")
+      ),
+      React.createElement("div", { style: { fontSize: 12.5, color: "#7f8c8d", marginBottom: 18 } },
+        "Supabase Storage에 저장된 기존 표본 사진을 찾아 Cloudinary로 복사합니다. 원본은 그대로 남아있고, 표본 관리번호와 파일명을 대조해 자동으로 매칭합니다. 시간이 걸릴 수 있으니 창을 닫지 말고 기다려주세요."
+      ),
+      total !== null && React.createElement("div", { style: { marginBottom: 14 } },
+        React.createElement("div", { style: { height: 8, background: "#eef2f5", borderRadius: 4, overflow: "hidden" } },
+          React.createElement("div", { style: { height: "100%", width: `${pct}%`, background: "#1a6b3e", transition: "width .3s" } })
+        ),
+        React.createElement("div", { style: { fontSize: 12, color: "#7f8c8d", marginTop: 6 } },
+          `${fmt(offset)} / ${fmt(total)}건 처리 — 이전됨 ${fmt(migrated)} · 건너뜀 ${fmt(skipped)} · 실패 ${fmt(failed)}`
+        )
+      ),
+      error && React.createElement("div", { style: { fontSize: 12.5, color: "#c0392b", marginBottom: 12 } }, "⚠ " + error),
+      done && !error && React.createElement("div", { style: { fontSize: 13, color: "#1a6b3e", fontWeight: 700, marginBottom: 12 } }, "✓ 완료되었습니다."),
+      !running && React.createElement("button", {
+        onClick: start,
+        style: { padding: "10px 20px", borderRadius: 8, border: "none", background: "#1a6b3e", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 700, marginBottom: 14 }
+      }, offset > 0 ? "이어서 계속하기" : "이전 시작"),
+      running && React.createElement("div", { style: { fontSize: 12.5, color: "#1a6b3e", fontWeight: 600, marginBottom: 14 } }, "⏳ 진행 중..."),
+      log.length > 0 && React.createElement("div", { style: { maxHeight: 220, overflowY: "auto", border: "1px solid #eef2f5", borderRadius: 8, padding: "8px 12px" } },
+        log.slice().reverse().slice(0, 100).map((r, i) => React.createElement("div", {
+          key: i,
+          style: { fontSize: 11.5, padding: "3px 0", color: r.status === "migrated" ? "#1a6b3e" : r.status === "skipped" ? "#95a5a6" : "#c0392b" }
+        }, `${r.status === "migrated" ? "✓" : r.status === "skipped" ? "–" : "✗"} ${r.file}${r.id ? ` → ${r.id}` : ""}${r.reason ? ` (${r.reason})` : ""}`))
+      )
+    )
+  );
+}
+
 function App() {
   const [page, setPage] = useState("home");
   const [navParams, setNavParams] = useState(null);
@@ -13020,6 +13107,7 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(() => isAdminLoggedIn());
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [showMigration, setShowMigration] = useState(false);
   const handleAdminLogout = () => { adminLogout(); setIsAdmin(false); };
 
   // ── 전체 표본 데이터: App 최상단에서 한 번만 관리 ──────────────────
@@ -13213,6 +13301,21 @@ function App() {
     }
   }, n.label)), isAdmin ? [
     /*#__PURE__*/React.createElement("button", {
+      key: "migrate",
+      onClick: () => setShowMigration(true),
+      style: {
+        background: "transparent",
+        border: "1px solid rgba(255,255,255,0.25)",
+        borderRadius: 7,
+        color: "#fff",
+        padding: "5px 12px",
+        cursor: "pointer",
+        fontSize: 12,
+        fontWeight: 600,
+        whiteSpace: "nowrap"
+      }
+    }, "📦 사진 이전"),
+    /*#__PURE__*/React.createElement("button", {
       key: "history",
       onClick: () => setShowHistory(true),
       style: {
@@ -13346,6 +13449,8 @@ function App() {
       if (site === "okcheon") loadOkcheonSpecimensOnce(true);
       else loadAllSpecimens();
     }
+  }), showMigration && /*#__PURE__*/React.createElement(PhotoMigrationModal, {
+    onClose: () => setShowMigration(false)
   }));
 }
 const root = ReactDOM.createRoot(document.getElementById('root'));
