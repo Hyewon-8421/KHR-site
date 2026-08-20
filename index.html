@@ -72,24 +72,10 @@ function useSpecimenPhotos(id) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${SUPABASE_URL}/storage/v1/object/list/${PHOTO_BUCKET}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "apikey": SUPABASE_ANON_KEY,
-          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-        },
-        body: JSON.stringify({ prefix: "", search: id, limit: 100, sortBy: { column: "name", order: "asc" } }),
-      });
+      const res = await fetch(`/.netlify/functions/list-photos-cloudinary?id=${encodeURIComponent(id)}`);
       const json = await res.json();
-      if (!Array.isArray(json)) throw new Error(json.message || "목록 조회 실패");
-      const list = json
-        .filter(f => f.name && f.id && (f.name === id || f.name.startsWith(id + ".") || f.name.startsWith(id + "-")))
-        .map(f => ({
-          name: f.name,
-          url: `${SUPABASE_URL}/storage/v1/object/public/${PHOTO_BUCKET}/${encodeURIComponent(f.name)}`,
-        }));
-      setPhotos(list);
+      if (!json.ok) throw new Error(json.error || "목록 조회 실패");
+      setPhotos(json.data || []);
     } catch (e) {
       setError(e.message);
       setPhotos([]);
@@ -100,46 +86,38 @@ function useSpecimenPhotos(id) {
 
   useEffect(() => { load(); }, [load]);
 
+  // 파일을 base64 문자열로 변환 (Cloudinary 업로드 API가 base64 데이터 URI를 그대로 받을 수 있음)
+  const fileToBase64 = file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("파일을 읽지 못했습니다"));
+    reader.readAsDataURL(file);
+  });
+
   const upload = async files => {
     const arr = Array.from(files || []);
-    for (let i = 0; i < arr.length; i++) {
-      const file = arr[i];
-      const ext = file.name.includes(".") ? file.name.split(".").pop() : "jpg";
-      const path = arr.length === 1 && photos.length === 0
-        ? `${id}.${ext}`
-        : `${id}-${Date.now()}-${i}.${ext}`;
-      const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${PHOTO_BUCKET}/${encodeURIComponent(path)}`, {
+    for (const file of arr) {
+      const fileBase64 = await fileToBase64(file);
+      const res = await fetch("/.netlify/functions/upload-photo-cloudinary", {
         method: "POST",
-        headers: {
-          "apikey": SUPABASE_ANON_KEY,
-          "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-          "Content-Type": file.type || "application/octet-stream",
-          "x-upsert": "true",
-        },
-        body: file,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: ADMIN_PASSWORD, id, fileName: file.name, contentType: file.type, fileBase64 }),
       });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.message || `업로드 실패 (${res.status})`);
-      }
+      const json = await res.json();
+      if (!json.ok) throw new Error(json.error || "업로드 실패");
     }
     await load();
   };
 
-  const remove = async name => {
-    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${PHOTO_BUCKET}`, {
-      method: "DELETE",
-      headers: {
-        "Content-Type": "application/json",
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": `Bearer ${SUPABASE_ANON_KEY}`,
-      },
-      body: JSON.stringify({ prefixes: [name] }),
+  // key: Cloudinary의 public_id (list에서 받아온 photo.key)
+  const remove = async key => {
+    const res = await fetch("/.netlify/functions/delete-photo-cloudinary", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: ADMIN_PASSWORD, key }),
     });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.message || `삭제 실패 (${res.status})`);
-    }
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || "삭제 실패");
     await load();
   };
 
@@ -221,7 +199,7 @@ function SpecimenPhotoGallery({ id, editable }) {
         style: { width: "100%", maxHeight: 360, objectFit: "contain", display: "block", cursor: "zoom-in" }
       }),
       editable && React.createElement("button", {
-        onClick: e => { e.stopPropagation(); handleRemove(activePhoto.name); },
+        onClick: e => { e.stopPropagation(); handleRemove(activePhoto.key); },
         title: "사진 삭제",
         style: { position: "absolute", top: 6, right: 6, width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 13, cursor: "pointer", lineHeight: "24px", padding: 0 }
       }, "✕")
@@ -10801,7 +10779,10 @@ function NavCard({
 }
 
 // ─── 공정서 통계 페이지 ────────────────────────────────────────────────────────
-function PharmaStatsPage() {
+function PharmaStatsPage({ stats, centerLabel }) {
+  // stats를 넘기지 않으면 기존(제주센터) 전역 통계를 그대로 사용한다 — 하위 호환.
+  const ST = stats || ST;
+  const CENTER = centerLabel || "제주센터";
   const d = {
     topFamilies: [{
       name: "국화과",
@@ -10882,22 +10863,22 @@ function PharmaStatsPage() {
     }
   }, /*#__PURE__*/React.createElement(StatCard, {
     label: "공정서 식물류 생약",
-    value: `${fmt(window.__STATS__.summary.pharmacopoeia.total)}종`,
+    value: `${fmt(ST.summary.pharmacopoeia.total)}종`,
     sub: "KP + KHP 통합",
     accent: "#2563a6"
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "식물 유래 기원종",
-    value: `${fmt(window.__STATS__.summary.pharmacopoeia.origins)}종`,
+    value: `${fmt(ST.summary.pharmacopoeia.origins)}종`,
     sub: "버섯 8종 포함",
     accent: "#2563a6"
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "KP 등재 기원종",
-    value: `${fmt(window.__STATS__.summary.pharmacopoeia.kpOrigins)}종`,
+    value: `${fmt(ST.summary.pharmacopoeia.kpOrigins)}종`,
     sub: "대한민국약전",
     accent: "#1a4a7a"
   }), /*#__PURE__*/React.createElement(StatCard, {
     label: "KHP 등재 기원종",
-    value: `${fmt(window.__STATS__.summary.pharmacopoeia.khpOrigins)}종`,
+    value: `${fmt(ST.summary.pharmacopoeia.khpOrigins)}종`,
     sub: "생약규격집",
     accent: "#3d87cf"
   })), /*#__PURE__*/React.createElement("div", {
@@ -10925,7 +10906,7 @@ function PharmaStatsPage() {
     total: total,
     color: `hsl(140,${60 - i * 3}%,${35 + i * 3}%)`
   })))), /*#__PURE__*/React.createElement(Section, {
-    title: `제주센터의 공정서 기원종 ${fmt(window.__STATS__.summary.originCoverage.total)}종 보유 현황`,
+    title: `${CENTER}의 공정서 기원종 ${fmt(ST.summary.originCoverage.total)}종 보유 현황`,
     style: {
       marginTop: 18
     }
@@ -10939,10 +10920,10 @@ function PharmaStatsPage() {
   }, /*#__PURE__*/React.createElement(DonutChart, {
     centerLabel: "공정서 기원종",
     segments: [{
-      pct: window.__STATS__.summary.originCoverage.coveredPct,
+      pct: ST.summary.originCoverage.coveredPct,
       color: "#2563a6"
     }, {
-      pct: 100 - window.__STATS__.summary.originCoverage.coveredPct,
+      pct: 100 - ST.summary.originCoverage.coveredPct,
       color: "#e8eded"
     }],
     size: 140
@@ -10953,21 +10934,24 @@ function PharmaStatsPage() {
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#2563a6",
     label: "표본 보유",
-    value: `${fmt(window.__STATS__.summary.originCoverage.covered)}종 (${window.__STATS__.summary.originCoverage.coveredPct}%)`
+    value: `${fmt(ST.summary.originCoverage.covered)}종 (${ST.summary.originCoverage.coveredPct}%)`
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
     label: "미보유",
-    value: `${fmt(window.__STATS__.summary.originCoverage.notCovered)}종 (${(100 - window.__STATS__.summary.originCoverage.coveredPct).toFixed(1)}%)`,
+    value: `${fmt(ST.summary.originCoverage.notCovered)}종 (${(100 - ST.summary.originCoverage.coveredPct).toFixed(1)}%)`,
     border: true
   })))));
 }
 
 // ─── 표본 통계 페이지 ─────────────────────────────────────────────────────────
-function SpecimenStatsPage() {
+function SpecimenStatsPage({ stats, hasStorage, centerLabel }) {
+  const HAS_STORAGE = hasStorage !== false;
   const [tab, setTab] = useState("overview");
   const [pharmaMode, setPharmaMode] = useState("incl"); // "incl" 동속 근연 포함 | "excl" 동속 근연 제외
-  const s = window.__STATS__.summary;
-  const st = window.__STATS__;
+  // stats를 넘기지 않으면 기존(제주센터) 전역 통계를 그대로 사용한다 — 하위 호환.
+  const st = stats || window.__STATS__;
+  const s = st.summary;
+  const CENTER = centerLabel || "제주센터";
   const incl = pharmaMode === "incl";
   const specimenPharmView = incl ? s.specimenPharm : s.specimenPharmExcl;
   const speciesPharmView = incl ? s.speciesPharm : s.speciesPharmExcl;
@@ -10989,7 +10973,7 @@ function SpecimenStatsPage() {
     }
   }, m.label)));
 
-  const tabButtons = /*#__PURE__*/React.createElement("div", {
+  const tabButtons = HAS_STORAGE && /*#__PURE__*/React.createElement("div", {
     style: { display: "flex", gap: 7, marginBottom: 20, flexWrap: "wrap" }
   }, [{ id: "overview", label: "전체 현황" }, { id: "s1", label: "제1수장고" }, { id: "s3", label: "제3수장고" }].map(t => /*#__PURE__*/React.createElement("button", {
     key: t.id,
@@ -11013,8 +10997,8 @@ function SpecimenStatsPage() {
     },
       /*#__PURE__*/React.createElement(StatCard, { label: "전체 표본", value: `${fmt(s.specimens.total)}점`, accent: "#1a6b3e" }),
       /*#__PURE__*/React.createElement(StatCard, { label: "전체 식물종", value: `${fmt(s.specimens.species)}종`, accent: "#1a6b3e" }),
-      /*#__PURE__*/React.createElement(StatCard, { label: "제1수장고", value: `${fmt(st.storage1.total)}점`, sub: `${fmt(s.storage1.species)} 기원종`, accent: "#2d9c63" }),
-      /*#__PURE__*/React.createElement(StatCard, { label: "제3수장고", value: `${fmt(st.storage3.total)}점`, sub: `${fmt(s.storage3.species)} 기원종`, accent: "#1a4a7a" })
+      HAS_STORAGE && /*#__PURE__*/React.createElement(StatCard, { label: "제1수장고", value: `${fmt(st.storage1.total)}점`, sub: `${fmt(s.storage1.species)} 기원종`, accent: "#2d9c63" }),
+      HAS_STORAGE && /*#__PURE__*/React.createElement(StatCard, { label: "제3수장고", value: `${fmt(st.storage3.total)}점`, sub: `${fmt(s.storage3.species)} 기원종`, accent: "#1a4a7a" })
     ),
     /*#__PURE__*/React.createElement("div", {
       style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }
@@ -11042,7 +11026,7 @@ function SpecimenStatsPage() {
         )
       )
     ),
-    (() => {
+    HAS_STORAGE && (() => {
       // 수장고별 비교는 실제 통계(st.storage1/st.storage3)에서 가져오며, 포함/제외 토글에 맞춰
       // kp/khp/both/none 또는 그 제외(Excl) 버전을 사용한다. (예전에는 이 부분이 목업 숫자로
       // 고정되어 있었다.)
@@ -11166,8 +11150,8 @@ function SpecimenStatsPage() {
 
   return /*#__PURE__*/React.createElement("div", null,
     /*#__PURE__*/React.createElement(SectionHeader, {
-      title: "제주센터 표본 현황 통계",
-      sub: `국립생약자원관 제주 센터 수장 표본 현황 — 총 ${fmt(s.specimens.total)}점`,
+      title: `${CENTER} 표본 현황 통계`,
+      sub: `${CENTER} 수장 표본 현황 — 총 ${fmt(s.specimens.total)}점`,
       color: "#1a6b3e"
     }),
     tabButtons,
@@ -12964,32 +12948,64 @@ function OkcheonCenterPage({ navParams, synonyms, reloadSynonyms }) {
 }
 
 // ─── 통계 (공정서 통계 + 표본 통계 통합 페이지) ─────────────────────────────────
-function StatsPage({ navParams }) {
+function StatsPage({ navParams, synonyms }) {
   const [subTab, setSubTab] = useState(navParams?.subTab || "pharma"); // pharma | specimen
+  const [center, setCenter] = useState("jeju"); // jeju | okcheon — 두 센터 통계는 합치지 않고 따로 보여준다
 
   useEffect(() => {
     if (navParams?.subTab) setSubTab(navParams.subTab);
   }, [navParams]);
 
+  const { data: okcheonSpecimens, loading: okcheonLoading } = useOkcheonSpecimens();
+  const okcheonStats = useMemo(
+    () => computeStatsFromSpecimens(okcheonSpecimens || [], window.__PHARMA__, synonyms || []),
+    [okcheonSpecimens, synonyms]
+  );
+
+  const activeStats = center === "jeju" ? window.__STATS__ : okcheonStats;
+  const activeCenterLabel = center === "jeju" ? "제주센터" : "옥천센터";
+  const activeHasStorage = center === "jeju";
+
   return /*#__PURE__*/React.createElement("div", null,
-    React.createElement("div", { style: { display: "flex", gap: 8, marginBottom: 18 } },
-      [{ id: "pharma", label: "📊 공정서 통계" }, { id: "specimen", label: "📦 표본 통계" }].map(t => React.createElement("button", {
-        key: t.id,
-        onClick: () => setSubTab(t.id),
-        style: {
-          padding: "9px 18px",
-          borderRadius: 9,
-          border: `1px solid ${subTab === t.id ? "#2563a6" : "#dce8dc"}`,
-          background: subTab === t.id ? "#2563a6" : "#fff",
-          color: subTab === t.id ? "#fff" : "#546e7a",
-          cursor: "pointer",
-          fontSize: 13.5,
-          fontWeight: 700
-        }
-      }, t.label))
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 18 } },
+      React.createElement("div", { style: { display: "flex", gap: 8 } },
+        [{ id: "pharma", label: "📊 공정서 통계" }, { id: "specimen", label: "📦 표본 통계" }].map(t => React.createElement("button", {
+          key: t.id,
+          onClick: () => setSubTab(t.id),
+          style: {
+            padding: "9px 18px",
+            borderRadius: 9,
+            border: `1px solid ${subTab === t.id ? "#2563a6" : "#dce8dc"}`,
+            background: subTab === t.id ? "#2563a6" : "#fff",
+            color: subTab === t.id ? "#fff" : "#546e7a",
+            cursor: "pointer",
+            fontSize: 13.5,
+            fontWeight: 700
+          }
+        }, t.label))
+      ),
+      React.createElement("div", { style: { display: "flex", gap: 8 } },
+        [{ id: "jeju", label: "🌱 제주센터" }, { id: "okcheon", label: "🌿 옥천센터" }].map(c => React.createElement("button", {
+          key: c.id,
+          onClick: () => setCenter(c.id),
+          style: {
+            padding: "7px 14px",
+            borderRadius: 8,
+            border: `1px solid ${center === c.id ? "#1a6b3e" : "#dce8dc"}`,
+            background: center === c.id ? "#1a6b3e" : "#fff",
+            color: center === c.id ? "#fff" : "#546e7a",
+            cursor: "pointer",
+            fontSize: 12.5,
+            fontWeight: 700
+          }
+        }, c.label))
+      )
     ),
-    subTab === "pharma" && React.createElement(PharmaStatsPage, null),
-    subTab === "specimen" && React.createElement(SpecimenStatsPage, null)
+    center === "okcheon" && okcheonLoading && React.createElement("div", {
+      style: { marginBottom: 14, fontSize: 12.5, color: "#1a6b3e", fontWeight: 600 }
+    }, "⏳ 옥천센터 표본 데이터 불러오는 중..."),
+    subTab === "pharma" && React.createElement(PharmaStatsPage, { stats: activeStats, centerLabel: activeCenterLabel }),
+    subTab === "specimen" && React.createElement(SpecimenStatsPage, { stats: activeStats, hasStorage: activeHasStorage, centerLabel: activeCenterLabel })
   );
 }
 
@@ -13173,7 +13189,7 @@ function App() {
       fontSize: 11,
       opacity: 0.7
     }
-  }, "국립생약자원관 제주 센터"))), /*#__PURE__*/React.createElement("nav", {
+  }, "국립생약자원관"))), /*#__PURE__*/React.createElement("nav", {
     style: {
       display: "flex",
       gap: 5,
@@ -13311,7 +13327,8 @@ function App() {
     specimensLoading: specimensLoading,
     specimensError: specimensError
   }), page === "stats" && /*#__PURE__*/React.createElement(StatsPage, {
-    navParams: navParams
+    navParams: navParams,
+    synonyms: synonyms
   })), /*#__PURE__*/React.createElement("footer", {
     style: {
       background: "#0f3d22",
