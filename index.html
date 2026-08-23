@@ -89,19 +89,36 @@ function useSpecimenPhotos(id) {
     reader.readAsDataURL(file);
   });
 
-  const upload = async files => {
+  const upload = async (files, onProgress) => {
     const arr = Array.from(files || []);
-    for (const file of arr) {
-      const fileBase64 = await fileToBase64(file);
-      const res = await fetch("/.netlify/functions/upload-photo-cloudinary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: ADMIN_PASSWORD, id, fileName: file.name, contentType: file.type, fileBase64 }),
-      });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "업로드 실패");
+    const failed = [];
+    for (let i = 0; i < arr.length; i++) {
+      const file = arr[i];
+      if (onProgress) onProgress(i + 1, arr.length, file.name);
+      try {
+        const fileBase64 = await fileToBase64(file);
+        const res = await fetch("/.netlify/functions/upload-photo-cloudinary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey: ADMIN_PASSWORD, id, fileName: file.name, contentType: file.type, fileBase64 }),
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || "업로드 실패");
+      } catch (e) {
+        // 한 장이 실패해도 나머지 파일 업로드는 계속 진행한다
+        failed.push({ name: file.name, error: e.message });
+      }
     }
     await load();
+    if (failed.length > 0) {
+      const err = new Error(
+        failed.length === arr.length
+          ? `전체 ${arr.length}장 업로드 실패`
+          : `${arr.length}장 중 ${failed.length}장 업로드 실패: ${failed.map(f => f.name).join(", ")}`
+      );
+      err.failed = failed;
+      throw err;
+    }
   };
 
   // key: Cloudinary의 public_id (list에서 받아온 photo.key)
@@ -126,6 +143,7 @@ function useSpecimenPhotos(id) {
 function SpecimenPhotoGallery({ id, editable }) {
   const { photos, loading, error, upload, remove } = useSpecimenPhotos(id);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(null); // { current, total, name }
   const [uploadErr, setUploadErr] = useState(null);
   const [lightbox, setLightbox] = useState(null);
   const [activeIdx, setActiveIdx] = useState(0); // 현재 큰 미리보기로 보여줄 사진의 인덱스
@@ -141,12 +159,14 @@ function SpecimenPhotoGallery({ id, editable }) {
     if (!files || files.length === 0) return;
     setUploading(true);
     setUploadErr(null);
+    setUploadProgress({ current: 0, total: files.length, name: "" });
     try {
-      await upload(files);
+      await upload(files, (current, total, name) => setUploadProgress({ current, total, name }));
     } catch (e) {
       setUploadErr(e.message);
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -168,7 +188,7 @@ function SpecimenPhotoGallery({ id, editable }) {
         onClick: () => fileRef.current?.click(),
         disabled: uploading,
         style: { padding: "4px 10px", borderRadius: 6, border: "1px solid #1a6b3e", background: "#fff", color: "#1a6b3e", cursor: uploading ? "default" : "pointer", fontSize: 11, fontWeight: 600 }
-      }, uploading ? "업로드 중..." : "＋ 사진 추가")
+      }, uploading && uploadProgress ? `업로드 중... (${uploadProgress.current}/${uploadProgress.total})` : "＋ 사진 추가 (여러 장 선택 가능)")
     ),
     editable && React.createElement("input", {
       ref: fileRef,
@@ -178,6 +198,7 @@ function SpecimenPhotoGallery({ id, editable }) {
       style: { display: "none" },
       onChange: e => { handleFiles(e.target.files); e.target.value = ""; }
     }),
+    uploading && uploadProgress && uploadProgress.name && React.createElement("div", { style: { fontSize: 11, color: "#1a6b3e", marginBottom: 8 } }, `업로드 중: ${uploadProgress.name}`),
     uploadErr && React.createElement("div", { style: { fontSize: 11.5, color: "#c0392b", marginBottom: 8 } }, "⚠ " + uploadErr),
     loading && React.createElement("div", { style: { fontSize: 12, color: "#95a5a6", padding: "10px 0" } }, "사진 불러오는 중..."),
     error && React.createElement("div", { style: { fontSize: 12, color: "#c0392b", padding: "10px 0" } }, "사진 목록을 불러오지 못했습니다: " + error),
@@ -9169,6 +9190,242 @@ function PharmaSearchPage({
 
 // ─── 제주 센터 표본 페이지 ──────────────────────────────────────────────────────
 const SPEC_KEYS = ["id", "specNo", "storage", "location", "drugName", "korName", "sciName", "collectDate", "collectPlace", "importance", "genus", "family", "gps", "pharma", "project"];
+// ─── 사진 대량 업로드 모달 ───────────────────────────────────────────────────
+// 표본 하나가 아니라 여러 표본의 사진을 한꺼번에 올릴 때 쓴다.
+// 파일명이 관리번호로 시작하면(예: "KHR23319686V.jpg", "KHR23319686V-2.jpg") 자동으로
+// 어느 표본 사진인지 찾아서, 그 표본의 Cloudinary 폴더에 업로드한다.
+// 10MB가 넘는 사진은 브라우저에서 자동으로 압축한 뒤 올린다(Cloudinary 무료 플랜 10MB 제한 대응).
+const BULK_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+
+// 관리번호 목록 중 파일명과 가장 길게 일치하는 것을 찾는다 (예: "KHR1234"가 "KHR123"보다 먼저 매칭).
+function matchSpecimenId(fileName, sortedIds) {
+  for (const id of sortedIds) {
+    if (fileName === id || fileName.startsWith(id + ".") || fileName.startsWith(id + "-")) return id;
+  }
+  return null;
+}
+
+// 이미지 파일을 캔버스로 리사이즈/재압축해서 Blob으로 돌려준다 (10MB 넘는 사진에만 사용).
+function compressImageFile(file, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        const MAX_DIM = 4000;
+        if (width > MAX_DIM || height > MAX_DIM) {
+          const scale = Math.min(MAX_DIM / width, MAX_DIM / height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const tryQuality = q => new Promise(res => canvas.toBlob(res, "image/jpeg", q));
+        (async () => {
+          let quality = 0.85;
+          let blob = await tryQuality(quality);
+          while (blob && blob.size > maxBytes && quality > 0.35) {
+            quality -= 0.15;
+            blob = await tryQuality(quality);
+          }
+          if (!blob) { reject(new Error("이미지 압축 실패")); return; }
+          resolve(blob);
+        })();
+      };
+      img.onerror = () => reject(new Error("이미지를 읽지 못했습니다"));
+      img.src = reader.result;
+    };
+    reader.onerror = () => reject(new Error("파일을 읽지 못했습니다"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("파일을 읽지 못했습니다"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function BulkPhotoUploadModal({ onClose, extraSpec, centerLabel }) {
+  const [phase, setPhase] = useState("select"); // select | preview | uploading | done
+  const [items, setItems] = useState([]); // [{ file, id, matched }]
+  const [progress, setProgress] = useState({ current: 0, total: 0, name: "" });
+  const [results, setResults] = useState([]); // [{ name, id, status: uploaded|compressed|skipped|failed, reason }]
+  const fileInputRef = useRef(null);
+  const folderInputRef = useRef(null);
+
+  const CENTER = centerLabel || "제주센터";
+  const sortedIds = useMemo(
+    () => (extraSpec || []).map(s => s[0]).filter(Boolean).sort((a, b) => b.length - a.length),
+    [extraSpec]
+  );
+
+  const handlePick = fileList => {
+    const files = Array.from(fileList || []).filter(f => f.type.startsWith("image/"));
+    const withMatch = files.map(file => ({
+      file,
+      id: matchSpecimenId(file.name, sortedIds),
+    }));
+    setItems(withMatch);
+    setPhase("preview");
+  };
+
+  const matchedItems = items.filter(it => it.id);
+  const unmatchedItems = items.filter(it => !it.id);
+
+  const startUpload = async () => {
+    setPhase("uploading");
+    const newResults = [];
+    for (let i = 0; i < matchedItems.length; i++) {
+      const { file, id } = matchedItems[i];
+      setProgress({ current: i + 1, total: matchedItems.length, name: file.name });
+      try {
+        let contentType = file.type || "image/jpeg";
+        let base64;
+        let compressed = false;
+        if (file.size > BULK_UPLOAD_MAX_BYTES) {
+          const blob = await compressImageFile(file, BULK_UPLOAD_MAX_BYTES);
+          base64 = await blobToBase64(blob);
+          contentType = "image/jpeg";
+          compressed = true;
+        } else {
+          base64 = await blobToBase64(file);
+        }
+        const res = await fetch("/.netlify/functions/upload-photo-cloudinary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey: ADMIN_PASSWORD, id, fileName: file.name, contentType, fileBase64: base64 }),
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || "업로드 실패");
+        newResults.push({ name: file.name, id, status: compressed ? "compressed" : "uploaded" });
+      } catch (e) {
+        newResults.push({ name: file.name, id, status: "failed", reason: e.message });
+      }
+    }
+    unmatchedItems.forEach(it => newResults.push({ name: it.file.name, id: null, status: "skipped", reason: "파일명에서 관리번호를 찾지 못함" }));
+    setResults(newResults);
+    setPhase("done");
+  };
+
+  const reset = () => {
+    setItems([]);
+    setResults([]);
+    setProgress({ current: 0, total: 0, name: "" });
+    setPhase("select");
+  };
+
+  const uploadedCount = results.filter(r => r.status === "uploaded" || r.status === "compressed").length;
+  const compressedCount = results.filter(r => r.status === "compressed").length;
+  const failedCount = results.filter(r => r.status === "failed").length;
+  const skippedCount = results.filter(r => r.status === "skipped").length;
+
+  return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: 640 },
+    React.createElement("div", { style: { padding: 28 } },
+      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+        React.createElement("div", { style: { fontSize: 17, fontWeight: 700, color: "#1a2e1a" } }, "📸 사진 대량 업로드"),
+        React.createElement("button", {
+          onClick: onClose,
+          style: { background: "#f4f8f4", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#546e7a" }
+        }, "✕")
+      ),
+      React.createElement("div", { style: { fontSize: 12.5, color: "#7f8c8d", marginBottom: 18 } },
+        `파일명이 관리번호로 시작하는 사진들을 한꺼번에 선택하면, ${CENTER} 표본과 자동으로 매칭해서 업로드합니다. 10MB가 넘는 사진은 자동으로 압축됩니다.`
+      ),
+
+      phase === "select" && React.createElement(React.Fragment, null,
+        React.createElement("input", {
+          ref: fileInputRef, type: "file", accept: "image/*", multiple: true, style: { display: "none" },
+          onChange: e => { handlePick(e.target.files); e.target.value = ""; }
+        }),
+        React.createElement("input", {
+          ref: folderInputRef, type: "file", webkitdirectory: "", directory: "", multiple: true, style: { display: "none" },
+          onChange: e => { handlePick(e.target.files); e.target.value = ""; }
+        }),
+        React.createElement("div", { style: { display: "flex", gap: 10 } },
+          React.createElement("button", {
+            onClick: () => fileInputRef.current?.click(),
+            style: { flex: 1, padding: "16px", borderRadius: 10, border: "1px dashed #b0dcc0", background: "#f8fbf8", color: "#1a6b3e", cursor: "pointer", fontSize: 13, fontWeight: 700 }
+          }, "🖼 사진 여러 장 선택"),
+          React.createElement("button", {
+            onClick: () => folderInputRef.current?.click(),
+            style: { flex: 1, padding: "16px", borderRadius: 10, border: "1px dashed #b0dcc0", background: "#f8fbf8", color: "#1a6b3e", cursor: "pointer", fontSize: 13, fontWeight: 700 }
+          }, "📁 폴더째 선택")
+        )
+      ),
+
+      phase === "preview" && React.createElement(React.Fragment, null,
+        React.createElement("div", { style: { display: "flex", gap: 16, marginBottom: 12, fontSize: 13 } },
+          React.createElement("div", null, React.createElement("b", { style: { color: "#1a6b3e" } }, matchedItems.length), " 개 매칭됨"),
+          unmatchedItems.length > 0 && React.createElement("div", null, React.createElement("b", { style: { color: "#c0392b" } }, unmatchedItems.length), " 개 매칭 안 됨")
+        ),
+        React.createElement("div", { style: { maxHeight: 260, overflowY: "auto", border: "1px solid #eef2f5", borderRadius: 8, padding: "8px 12px", marginBottom: 14 } },
+          items.map((it, i) => React.createElement("div", {
+            key: i,
+            style: { fontSize: 11.5, padding: "3px 0", color: it.id ? "#1a2e1a" : "#c0392b", display: "flex", justifyContent: "space-between", gap: 8 }
+          },
+            React.createElement("span", null, it.file.name, it.file.size > BULK_UPLOAD_MAX_BYTES ? " (압축 예정)" : ""),
+            React.createElement("span", { style: { fontFamily: "monospace" } }, it.id || "매칭 안 됨")
+          ))
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 8 } },
+          React.createElement("button", {
+            onClick: reset,
+            style: { padding: "10px 18px", borderRadius: 8, border: "1px solid #dce8dc", background: "#fff", color: "#546e7a", cursor: "pointer", fontSize: 13, fontWeight: 600 }
+          }, "다시 선택"),
+          React.createElement("button", {
+            onClick: startUpload,
+            disabled: matchedItems.length === 0,
+            style: { flex: 1, padding: "10px 18px", borderRadius: 8, border: "none", background: matchedItems.length === 0 ? "#bcd6c6" : "#1a6b3e", color: "#fff", cursor: matchedItems.length === 0 ? "default" : "pointer", fontSize: 13, fontWeight: 700 }
+          }, `매칭된 ${matchedItems.length}개 업로드 시작`)
+        )
+      ),
+
+      phase === "uploading" && React.createElement(React.Fragment, null,
+        React.createElement("div", { style: { marginBottom: 8 } },
+          React.createElement("div", { style: { height: 8, background: "#eef2f5", borderRadius: 4, overflow: "hidden" } },
+            React.createElement("div", { style: { height: "100%", width: `${progress.total ? Math.round(progress.current / progress.total * 100) : 0}%`, background: "#1a6b3e", transition: "width .3s" } })
+          )
+        ),
+        React.createElement("div", { style: { fontSize: 12.5, color: "#1a6b3e", fontWeight: 600 } },
+          `⏳ ${progress.current}/${progress.total} 업로드 중... (${progress.name})`
+        )
+      ),
+
+      phase === "done" && React.createElement(React.Fragment, null,
+        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "#1a6b3e", marginBottom: 4 } }, "✓ 완료되었습니다"),
+        React.createElement("div", { style: { fontSize: 12.5, color: "#546e7a", marginBottom: 12 } },
+          `업로드 ${uploadedCount}건(그중 압축 ${compressedCount}건) · 매칭 안 돼 건너뜀 ${skippedCount}건 · 실패 ${failedCount}건`
+        ),
+        results.length > 0 && React.createElement("div", { style: { maxHeight: 260, overflowY: "auto", border: "1px solid #eef2f5", borderRadius: 8, padding: "8px 12px", marginBottom: 14 } },
+          results.map((r, i) => React.createElement("div", {
+            key: i,
+            style: { fontSize: 11.5, padding: "3px 0", color: r.status === "failed" ? "#c0392b" : r.status === "skipped" ? "#95a5a6" : "#1a6b3e" }
+          }, `${r.status === "uploaded" ? "✓" : r.status === "compressed" ? "✓(압축)" : r.status === "skipped" ? "–" : "✗"} ${r.name}${r.id ? ` → ${r.id}` : ""}${r.reason ? ` (${r.reason})` : ""}`))
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 8 } },
+          React.createElement("button", {
+            onClick: reset,
+            style: { padding: "10px 18px", borderRadius: 8, border: "1px solid #dce8dc", background: "#fff", color: "#546e7a", cursor: "pointer", fontSize: 13, fontWeight: 600 }
+          }, "다른 사진 더 올리기"),
+          React.createElement("button", {
+            onClick: onClose,
+            style: { flex: 1, padding: "10px 18px", borderRadius: 8, border: "none", background: "#1a6b3e", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 700 }
+          }, "닫기")
+        )
+      )
+    )
+  );
+}
+
 function SpecimenSearchPage({
   navParams,
   extraSpec,
@@ -9211,6 +9468,7 @@ function SpecimenSearchPage({
   const [uploadState, setUploadState] = useState("idle");
   const [uploadResult, setUploadResult] = useState(null);
   const [showUpload, setShowUpload] = useState(false);
+  const [showBulkPhotoUpload, setShowBulkPhotoUpload] = useState(false);
   const [isUpsertMode, setIsUpsertMode] = useState(false); // false=신규추가, true=수정업데이트
   const [syncState, setSyncState] = useState("idle"); // idle | syncing | done | error
   const fileInputRef = useRef(null);
@@ -9526,6 +9784,19 @@ function SpecimenSearchPage({
     }
   }, "⬇ 업로드 양식 다운로드"),
   isAdmin && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowBulkPhotoUpload(true),
+    style: {
+      padding: "7px 14px",
+      borderRadius: 8,
+      border: "1px solid #7a3d1a",
+      background: "#fff",
+      color: "#7a3d1a",
+      cursor: "pointer",
+      fontSize: 12.5,
+      fontWeight: 600
+    }
+  }, "📸 사진 대량 업로드"),
+  isAdmin && /*#__PURE__*/React.createElement("button", {
     onClick: () => {
       setShowUpload(!showUpload);
       setUploadState("idle");
@@ -9543,7 +9814,11 @@ function SpecimenSearchPage({
     }
   }, showUpload ? "✕ 닫기" : "＋ 표본 업로드")), !isAdmin && /*#__PURE__*/React.createElement("div", {
     style: { textAlign: "right", fontSize: 11.5, color: "#95a5a6", marginTop: -6, marginBottom: 12 }
-  }, "🔒 표본 등록·수정·삭제는 관리자 로그인 후 이용할 수 있습니다."), showUpload && isAdmin && /*#__PURE__*/React.createElement("div", {
+  }, "🔒 표본 등록·수정·삭제는 관리자 로그인 후 이용할 수 있습니다."), showBulkPhotoUpload && /*#__PURE__*/React.createElement(BulkPhotoUploadModal, {
+    onClose: () => setShowBulkPhotoUpload(false),
+    extraSpec: extraSpec,
+    centerLabel: CENTER
+  }), showUpload && isAdmin && /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#fff",
       borderRadius: 12,
@@ -13004,98 +13279,6 @@ function StatsPage({ navParams, synonyms }) {
   );
 }
 
-// ─── Supabase → Cloudinary 사진 이전 모달 ──────────────────────────────────────
-// Supabase Storage에 예전에 올려둔 표본 사진들을 Cloudinary로 복사해온다.
-// 원본(Supabase)은 건드리지 않고 그대로 두며, 여러 번 실행해도 안전하도록
-// 작은 배치(기본 10개)로 나누어 순차 처리한다.
-function PhotoMigrationModal({ onClose }) {
-  const [running, setRunning] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const [total, setTotal] = useState(null);
-  const [migrated, setMigrated] = useState(0);
-  const [skipped, setSkipped] = useState(0);
-  const [failed, setFailed] = useState(0);
-  const [log, setLog] = useState([]);
-  const [error, setError] = useState(null);
-  const [done, setDone] = useState(false);
-
-  const runBatch = async (currentOffset) => {
-    try {
-      const res = await fetch("/.netlify/functions/migrate-photos-to-cloudinary", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: ADMIN_PASSWORD, offset: currentOffset, limit: 10 }),
-      });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "이전 실패");
-      setTotal(json.total);
-      const newMigrated = json.results.filter(r => r.status === "migrated").length;
-      const newSkipped = json.results.filter(r => r.status === "skipped").length;
-      const newFailed = json.results.filter(r => r.status === "failed").length;
-      setMigrated(m => m + newMigrated);
-      setSkipped(s => s + newSkipped);
-      setFailed(f => f + newFailed);
-      setLog(prev => [...prev, ...json.results]);
-      const nextOffset = currentOffset + json.processed;
-      setOffset(nextOffset);
-      if (json.hasMore && json.processed > 0) {
-        await runBatch(nextOffset);
-      } else {
-        setRunning(false);
-        setDone(true);
-      }
-    } catch (e) {
-      setError(e.message);
-      setRunning(false);
-    }
-  };
-
-  const start = () => {
-    setRunning(true);
-    setError(null);
-    setDone(false);
-    runBatch(offset);
-  };
-
-  const pct = total ? Math.round((offset / total) * 100) : 0;
-
-  return /*#__PURE__*/React.createElement(Modal, { onClose, maxWidth: 640 },
-    React.createElement("div", { style: { padding: 28 } },
-      React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
-        React.createElement("div", { style: { fontSize: 17, fontWeight: 700, color: "#1a2e1a" } }, "📦 Supabase → Cloudinary 사진 이전"),
-        React.createElement("button", {
-          onClick: onClose,
-          style: { background: "#f4f8f4", border: "none", borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 18, color: "#546e7a" }
-        }, "✕")
-      ),
-      React.createElement("div", { style: { fontSize: 12.5, color: "#7f8c8d", marginBottom: 18 } },
-        "Supabase Storage에 저장된 기존 표본 사진을 찾아 Cloudinary로 복사합니다. 원본은 그대로 남아있고, 표본 관리번호와 파일명을 대조해 자동으로 매칭합니다. 시간이 걸릴 수 있으니 창을 닫지 말고 기다려주세요."
-      ),
-      total !== null && React.createElement("div", { style: { marginBottom: 14 } },
-        React.createElement("div", { style: { height: 8, background: "#eef2f5", borderRadius: 4, overflow: "hidden" } },
-          React.createElement("div", { style: { height: "100%", width: `${pct}%`, background: "#1a6b3e", transition: "width .3s" } })
-        ),
-        React.createElement("div", { style: { fontSize: 12, color: "#7f8c8d", marginTop: 6 } },
-          `${fmt(offset)} / ${fmt(total)}건 처리 — 이전됨 ${fmt(migrated)} · 건너뜀 ${fmt(skipped)} · 실패 ${fmt(failed)}`
-        )
-      ),
-      error && React.createElement("div", { style: { fontSize: 12.5, color: "#c0392b", marginBottom: 12 } }, "⚠ " + error),
-      done && !error && React.createElement("div", { style: { fontSize: 13, color: "#1a6b3e", fontWeight: 700, marginBottom: 12 } }, "✓ 완료되었습니다."),
-      !running && React.createElement("button", {
-        onClick: start,
-        style: { padding: "10px 20px", borderRadius: 8, border: "none", background: "#1a6b3e", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 700, marginBottom: 14 }
-      }, offset > 0 ? "이어서 계속하기" : "이전 시작"),
-      running && React.createElement("div", { style: { fontSize: 12.5, color: "#1a6b3e", fontWeight: 600, marginBottom: 14 } }, "⏳ 진행 중..."),
-      log.length > 0 && React.createElement("div", { style: { maxHeight: 220, overflowY: "auto", border: "1px solid #eef2f5", borderRadius: 8, padding: "8px 12px" } },
-        log.slice().reverse().slice(0, 100).map((r, i) => React.createElement("div", {
-          key: i,
-          style: { fontSize: 11.5, padding: "3px 0", color: r.status === "migrated" ? "#1a6b3e" : r.status === "skipped" ? "#95a5a6" : "#c0392b" }
-        }, `${r.status === "migrated" ? "✓" : r.status === "skipped" ? "–" : "✗"} ${r.file}${r.id ? ` → ${r.id}` : ""}${r.reason ? ` (${r.reason})` : ""}`))
-      )
-    )
-  );
-}
-
 function App() {
   const [page, setPage] = useState("home");
   const [navParams, setNavParams] = useState(null);
@@ -13107,7 +13290,6 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(() => isAdminLoggedIn());
   const [showAdminLogin, setShowAdminLogin] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [showMigration, setShowMigration] = useState(false);
   const handleAdminLogout = () => { adminLogout(); setIsAdmin(false); };
 
   // ── 전체 표본 데이터: App 최상단에서 한 번만 관리 ──────────────────
@@ -13301,21 +13483,6 @@ function App() {
     }
   }, n.label)), isAdmin ? [
     /*#__PURE__*/React.createElement("button", {
-      key: "migrate",
-      onClick: () => setShowMigration(true),
-      style: {
-        background: "transparent",
-        border: "1px solid rgba(255,255,255,0.25)",
-        borderRadius: 7,
-        color: "#fff",
-        padding: "5px 12px",
-        cursor: "pointer",
-        fontSize: 12,
-        fontWeight: 600,
-        whiteSpace: "nowrap"
-      }
-    }, "📦 사진 이전"),
-    /*#__PURE__*/React.createElement("button", {
       key: "history",
       onClick: () => setShowHistory(true),
       style: {
@@ -13449,8 +13616,6 @@ function App() {
       if (site === "okcheon") loadOkcheonSpecimensOnce(true);
       else loadAllSpecimens();
     }
-  }), showMigration && /*#__PURE__*/React.createElement(PhotoMigrationModal, {
-    onClose: () => setShowMigration(false)
   }));
 }
 const root = ReactDOM.createRoot(document.getElementById('root'));
