@@ -8901,7 +8901,7 @@ function OriginSpecimenModal({
       style: { display: "flex", gap: 12, fontSize: 10.5, color: "#95a5a6" }
     }, /*#__PURE__*/React.createElement("span", {
       style: { fontFamily: "monospace" }
-    }, id), cd && /*#__PURE__*/React.createElement("span", null, cd)));
+    }, id), cd && /*#__PURE__*/React.createElement("span", null, formatCollectDate(cd))));
   }))), selectedSpec && /*#__PURE__*/React.createElement(SpecimenModal, {
     spec: selectedSpec,
     onClose: () => setSelectedSpec(null)
@@ -12240,7 +12240,7 @@ function SpeciesModal({
       style: {
         fontFamily: "monospace"
       }
-    }, id), cd && /*#__PURE__*/React.createElement("span", null, cd)));
+    }, id), cd && /*#__PURE__*/React.createElement("span", null, formatCollectDate(cd))));
   }))), selectedSpec && /*#__PURE__*/React.createElement(SpecimenModal, {
     spec: selectedSpec,
     endpoints: endpoints,
