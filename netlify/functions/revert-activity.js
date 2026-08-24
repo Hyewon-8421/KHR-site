@@ -75,6 +75,22 @@ async function restoreOne(table, id, beforeRow) {
   }
 }
 
+// before_data가 [{ id, before }, ...] 배열 형태인 이력(일괄 업로드, 일괄 삭제)을
+// 한꺼번에 되돌린다. 각 항목의 before가 있으면 그 값으로 복원(PATCH/INSERT), 없으면
+// (=원래 없었던 표본이면) 삭제한다.
+async function restoreMany(table, items) {
+  let restored = 0, deleted = 0, failed = 0;
+  for (const item of items) {
+    try {
+      await restoreOne(table, item.id, item.before);
+      if (item.before) restored++; else deleted++;
+    } catch (e) {
+      failed++;
+    }
+  }
+  return { restored, deleted, failed };
+}
+
 exports.handler = async function(event, context) {
   if (event.httpMethod === "OPTIONS") {
     return {
@@ -156,22 +172,23 @@ exports.handler = async function(event, context) {
 
     // 2) 실제 되돌리기 수행
     if (entry.action === "update") {
+      // 단일 표본 수정 되돌리기: before_data는 그 표본의 이전 값(객체) 하나
       await restoreOne(table, entry.spec_id, entry.before_data);
       detail = `수정 이력을 되돌림 (관리번호: ${entry.spec_id})`;
     } else if (entry.action === "delete") {
-      await restoreOne(table, entry.spec_id, entry.before_data);
-      detail = `삭제된 표본을 복원함 (관리번호: ${entry.spec_id})`;
-    } else if (entry.action === "upload") {
-      const items = Array.isArray(entry.before_data) ? entry.before_data : [];
-      let restored = 0, deleted = 0, failed = 0;
-      for (const item of items) {
-        try {
-          await restoreOne(table, item.id, item.before);
-          if (item.before) restored++; else deleted++;
-        } catch (e) {
-          failed++;
-        }
+      if (Array.isArray(entry.before_data)) {
+        // 일괄 삭제(선택 삭제) 되돌리기: before_data는 [{ id, before }, ...] 배열
+        const { restored, failed } = await restoreMany(table, entry.before_data);
+        detail = `삭제된 표본 ${entry.before_data.length}건을 복원함${failed ? ` (실패 ${failed}건)` : ""}`;
+      } else {
+        // 단일 표본 삭제 되돌리기(예전 형식): before_data는 그 표본의 이전 값(객체) 하나
+        await restoreOne(table, entry.spec_id, entry.before_data);
+        detail = `삭제된 표본을 복원함 (관리번호: ${entry.spec_id})`;
       }
+    } else if (entry.action === "upload") {
+      // 일괄 업로드 되돌리기: before_data는 [{ id, before }, ...] 배열
+      const items = Array.isArray(entry.before_data) ? entry.before_data : [];
+      const { restored, deleted, failed } = await restoreMany(table, items);
       detail = `업로드 이력을 되돌림 (복원 ${restored}건, 신규 삭제 ${deleted}건${failed ? `, 실패 ${failed}건` : ""})`;
     } else {
       return {
