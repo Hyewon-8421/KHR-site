@@ -32,8 +32,57 @@ const {
   useEffect,
   useCallback,
   useRef,
-  useMemo
+  useMemo,
+  useContext
 } = React;
+
+// ─── 언어(한국어/영어) 전환 ────────────────────────────────────────────────
+// 대시보드 상단의 작은 전환 버튼으로 한국어/영어 UI를 바꿀 수 있도록 하는
+// 아주 가벼운 다국어 지원. 페이지 전체에 걸친 완전한 번역 대신, 각 문자열이
+// 쓰이는 자리에서 t("한국어", "English") 형태로 그때그때 감싸는 방식을 쓴다.
+// 선택한 언어는 localStorage에 저장되어 다음 방문 때도 유지된다.
+const LANG_STORAGE_KEY = "khr_lang";
+const LangContext = React.createContext({ lang: "ko", setLang: () => {}, t: (ko) => ko });
+function useLangState() {
+  const [lang, setLangState] = useState(() => {
+    try { return localStorage.getItem(LANG_STORAGE_KEY) || "ko"; } catch (e) { return "ko"; }
+  });
+  const setLang = useCallback((next) => {
+    setLangState(next);
+    try { localStorage.setItem(LANG_STORAGE_KEY, next); } catch (e) {}
+  }, []);
+  const t = useCallback((ko, en) => (lang === "en" ? (en != null ? en : ko) : ko), [lang]);
+  return { lang, setLang, t };
+}
+function useT() {
+  return useContext(LangContext).t;
+}
+// 대시보드 상단에 놓는 작은 한/영 전환 버튼
+function LangToggle() {
+  const { lang, setLang } = useContext(LangContext);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      border: "1px solid rgba(255,255,255,0.35)",
+      borderRadius: 7,
+      overflow: "hidden",
+      flexShrink: 0
+    }
+  }, ["ko", "en"].map(code => /*#__PURE__*/React.createElement("button", {
+    key: code,
+    onClick: () => setLang(code),
+    style: {
+      background: lang === code ? "rgba(255,255,255,0.28)" : "transparent",
+      border: "none",
+      color: "#fff",
+      padding: "5px 10px",
+      cursor: "pointer",
+      fontSize: 11.5,
+      fontWeight: 700,
+      letterSpacing: 0.3
+    }
+  }, code === "ko" ? "KOR" : "ENG")));
+}
 
 // ─── 관리자 인증 ──────────────────────────────────────────────────────────
 // Netlify Functions(save-specimens/update-specimen/delete-specimen)이 요구하는
@@ -9688,6 +9737,7 @@ function SpecimenSearchPage({
   const [isUpsertMode, setIsUpsertMode] = useState(false); // false=신규추가, true=수정업데이트
   const [syncState, setSyncState] = useState("idle"); // idle | syncing | done | error
   const PAGE_SIZE = 50;
+  const fileInputRef = useRef(null);
 
   // 표본 데이터를 다시 불러오고 싶을 때(예: 업로드 후 새로고침 버튼) 사용
   const loadFromSheets = reloadSpecimens;
@@ -10845,6 +10895,7 @@ function LegendItem({
 // 두 센터의 데이터를 합치지 않고 각각 따로 보여주기 위해, HomePage에서 탭으로 어느 센터의
 // stats를 넘길지만 바꿔주고 이 컴포넌트는 그 stats만 가지고 그린다.
 function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, loading, progress }) {
+  const t = useT();
   const s = stats.summary;
   const st = stats;
   const HAS_STORAGE = hasStorage !== false;
@@ -10865,7 +10916,7 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
         fontWeight: 700,
         color: "#1a6b3e"
       }
-    }, "⏳ ", centerLabel, " 표본 데이터 불러오는 중", progress?.total ? ` (${fmt(progress.loaded)} / ${fmt(progress.total)}건)` : "", " · 완료되면 아래 수치가 자동으로 갱신됩니다"),
+    }, "⏳ ", centerLabel, t(" 표본 데이터 불러오는 중", " loading specimen data"), progress?.total ? ` (${fmt(progress.loaded)} / ${fmt(progress.total)}${t("건", "")})` : "", t(" · 완료되면 아래 수치가 자동으로 갱신됩니다", " · figures below refresh automatically once complete")),
     /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
@@ -10874,39 +10925,39 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
       marginBottom: 24
     }
   }, /*#__PURE__*/React.createElement(StatCard, {
-    label: "총 표본 수",
-    value: `${fmt(s.specimens.total)}점`,
-    sub: `${centerLabel} 전체`,
+    label: t("총 표본 수", "Total Specimens"),
+    value: `${fmt(s.specimens.total)}${t("점", "")}`,
+    sub: t(`${centerLabel} 전체`, `All (${centerLabel})`),
     accent: "#1a6b3e",
     onClick: () => onNav(navPrefix, { subTab: "specimen" })
   }), /*#__PURE__*/React.createElement(StatCard, {
-    label: "총 식물종 수",
-    value: `${fmt(s.specimens.species)}종`,
-    sub: `${centerLabel} 전체`,
+    label: t("총 식물종 수", "Total Plant Species"),
+    value: `${fmt(s.specimens.species)}${t("종", "")}`,
+    sub: t(`${centerLabel} 전체`, `All (${centerLabel})`),
     accent: "#1a6b3e",
     onClick: () => onNav(navPrefix, { subTab: "species", tab: "all" })
   }), /*#__PURE__*/React.createElement(StatCard, {
-    label: "공정서 식물류 생약",
-    value: `${fmt(s.pharmacopoeia.total)}종`,
-    sub: "KP + KHP 통합",
+    label: t("공정서 식물류 생약", "Pharmacopoeia Herbs"),
+    value: `${fmt(s.pharmacopoeia.total)}${t("종", "")}`,
+    sub: t("KP + KHP 통합", "KP + KHP combined"),
     accent: "#2563a6",
     onClick: () => onNav("pharma-search")
   }), /*#__PURE__*/React.createElement(StatCard, {
-    label: "공정서 기원종",
-    value: `${fmt(s.pharmacopoeia.origins)}종`,
-    sub: "버섯 8종 포함",
+    label: t("공정서 기원종", "Pharmacopoeia Origin Species"),
+    value: `${fmt(s.pharmacopoeia.origins)}${t("종", "")}`,
+    sub: t("버섯 8종 포함", "incl. 8 fungal species"),
     accent: "#2563a6",
     onClick: () => onNav("stats", { subTab: "pharma" })
   }), HAS_STORAGE && /*#__PURE__*/React.createElement(StatCard, {
-    label: "제1수장고 표본",
-    value: `${fmt(st.storage1.total)}점`,
-    sub: `${fmt(s.storage1.species)} 기원종`,
+    label: t("제1수장고 표본", "Storage Room 1 Specimens"),
+    value: `${fmt(st.storage1.total)}${t("점", "")}`,
+    sub: `${fmt(s.storage1.species)} ${t("기원종", "origin spp.")}`,
     accent: "#2d9c63",
     onClick: () => onNav(navPrefix, { subTab: "specimen", storage: "1수장고" })
   }), HAS_STORAGE && /*#__PURE__*/React.createElement(StatCard, {
-    label: "제3수장고 표본",
-    value: `${fmt(st.storage3.total)}점`,
-    sub: `${fmt(s.storage3.species)} 기원종`,
+    label: t("제3수장고 표본", "Storage Room 3 Specimens"),
+    value: `${fmt(st.storage3.total)}${t("점", "")}`,
+    sub: `${fmt(s.storage3.species)} ${t("기원종", "origin spp.")}`,
     accent: "#1a4a7a",
     onClick: () => onNav(navPrefix, { subTab: "specimen", storage: "3수장고" })
   })), /*#__PURE__*/React.createElement("div", {
@@ -10917,10 +10968,10 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
     }
   }, [{
     id: "incl",
-    label: "동속 근연 포함"
+    label: t("동속 근연 포함", "Incl. congeneric/allied")
   }, {
     id: "excl",
-    label: "동속 근연 제외"
+    label: t("동속 근연 제외", "Excl. congeneric/allied")
   }].map(m => /*#__PURE__*/React.createElement("button", {
     key: m.id,
     onClick: () => setPharmaMode(m.id),
@@ -10942,7 +10993,7 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
       marginBottom: 24
     }
   }, /*#__PURE__*/React.createElement(Section, {
-    title: `표본 공정서 등재율 (${fmt(s.specimens.total)}점)`
+    title: t(`표본 공정서 등재율 (${fmt(s.specimens.total)}점)`, `Specimen Pharmacopoeia Coverage (${fmt(s.specimens.total)} pcs)`)
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -10963,27 +11014,27 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
     }
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#1a6b3e",
-    label: "공정서 등재",
-    value: `${fmt(specimenPharmView.both)}점 (${specimenPharmView.bothPct}%)`,
+    label: t("공정서 등재", "Listed"),
+    value: `${fmt(specimenPharmView.both)}${t("점", "")} (${specimenPharmView.bothPct}%)`,
     onClick: () => onNav(navPrefix, { subTab: "specimen", pharma: "등재" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#4bbf84",
-    label: "KP 등재",
-    value: `${fmt(specimenPharmView.kp)}점`,
+    label: t("KP 등재", "KP Listed"),
+    value: `${fmt(specimenPharmView.kp)}${t("점", "")}`,
     onClick: () => onNav(navPrefix, { subTab: "specimen", pharma: "KP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#78d4a4",
-    label: "KHP 등재",
-    value: `${fmt(specimenPharmView.khp)}점`,
+    label: t("KHP 등재", "KHP Listed"),
+    value: `${fmt(specimenPharmView.khp)}${t("점", "")}`,
     onClick: () => onNav(navPrefix, { subTab: "specimen", pharma: "KHP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
-    label: "미등재",
-    value: `${fmt(specimenPharmView.none)}점`,
+    label: t("미등재", "Not Listed"),
+    value: `${fmt(specimenPharmView.none)}${t("점", "")}`,
     border: true,
     onClick: () => onNav(navPrefix, { subTab: "specimen", pharma: "미등재" })
   })))), /*#__PURE__*/React.createElement(Section, {
-    title: `식물종 공정서 등재율 (${fmt(s.specimens.species)}종)`
+    title: t(`식물종 공정서 등재율 (${fmt(s.specimens.species)}종)`, `Species Pharmacopoeia Coverage (${fmt(s.specimens.species)} spp.)`)
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -11004,27 +11055,27 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
     }
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#2563a6",
-    label: "공정서 등재",
-    value: `${fmt(speciesPharmView.both)}종 (${speciesPharmView.bothPct}%)`,
+    label: t("공정서 등재", "Listed"),
+    value: `${fmt(speciesPharmView.both)}${t("종", "")} (${speciesPharmView.bothPct}%)`,
     onClick: () => onNav(navPrefix, { subTab: "species", pharma: "등재" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#3d87cf",
-    label: "KP 등재",
-    value: `${fmt(speciesPharmView.kp)}종`,
+    label: t("KP 등재", "KP Listed"),
+    value: `${fmt(speciesPharmView.kp)}${t("종", "")}`,
     onClick: () => onNav(navPrefix, { subTab: "species", pharma: "KP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#6aaae0",
-    label: "KHP 등재",
-    value: `${fmt(speciesPharmView.khp)}종`,
+    label: t("KHP 등재", "KHP Listed"),
+    value: `${fmt(speciesPharmView.khp)}${t("종", "")}`,
     onClick: () => onNav(navPrefix, { subTab: "species", pharma: "KHP" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
-    label: "미등재",
-    value: `${fmt(speciesPharmView.none)}종`,
+    label: t("미등재", "Not Listed"),
+    value: `${fmt(speciesPharmView.none)}${t("종", "")}`,
     border: true,
     onClick: () => onNav(navPrefix, { subTab: "species", pharma: "미등재" })
   }))))), /*#__PURE__*/React.createElement(Section, {
-    title: `공정서 기원종 ${fmt(s.originCoverage.total)}종 중 ${centerLabel} 보유율`,
+    title: t(`공정서 기원종 ${fmt(s.originCoverage.total)}종 중 ${centerLabel} 보유율`, `${centerLabel} Coverage of ${fmt(s.originCoverage.total)} Pharmacopoeia Origin Species`),
     style: {
       marginBottom: 24
     }
@@ -11036,7 +11087,7 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
       flexWrap: "wrap"
     }
   }, /*#__PURE__*/React.createElement(DonutChart, {
-    centerLabel: "공정서 기원종",
+    centerLabel: t("공정서 기원종", "Origin Species"),
     segments: [{
       pct: s.originCoverage.coveredPct,
       color: "#e67e22"
@@ -11050,13 +11101,13 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
     }
   }, /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e67e22",
-    label: "보유",
-    value: `${fmt(s.originCoverage.covered)}종 (${s.originCoverage.coveredPct}%)`,
+    label: t("보유", "Held"),
+    value: `${fmt(s.originCoverage.covered)}${t("종", "")} (${s.originCoverage.coveredPct}%)`,
     onClick: () => onNav("pharma-search", { heldFilter: "보유" })
   }), /*#__PURE__*/React.createElement(LegendItem, {
     color: "#e8eded",
-    label: "미보유",
-    value: `${fmt(s.originCoverage.notCovered)}종 (${(100 - s.originCoverage.coveredPct).toFixed(1)}%)`,
+    label: t("미보유", "Not Held"),
+    value: `${fmt(s.originCoverage.notCovered)}${t("종", "")} (${(100 - s.originCoverage.coveredPct).toFixed(1)}%)`,
     border: true,
     onClick: () => onNav("pharma-search", { heldFilter: "미보유" })
   })), /*#__PURE__*/React.createElement("div", {
@@ -11066,11 +11117,11 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
       color: "#546e7a",
       lineHeight: 1.7
     }
-  }, "공정서 등재 식물 유래 기원종 ", /*#__PURE__*/React.createElement("b", null, `${fmt(s.originCoverage.total)}종`), " 중 ", /*#__PURE__*/React.createElement("b", {
+  }, t("공정서 등재 식물 유래 기원종 ", "Of "), /*#__PURE__*/React.createElement("b", null, `${fmt(s.originCoverage.total)}${t("종", "")}`), t(" 중 ", " pharmacopoeia-listed origin species, "), /*#__PURE__*/React.createElement("b", {
     style: {
       color: "#e67e22"
     }
-  }, `${fmt(s.originCoverage.covered)}종(${s.originCoverage.coveredPct}%)`), `을 표본으로 보유. 나머지 ${fmt(s.originCoverage.notCovered)}종 추가 수집 진행 중.`)))
+  }, `${fmt(s.originCoverage.covered)}${t("종", "")}(${s.originCoverage.coveredPct}%)`), t(`을 표본으로 보유. 나머지 ${fmt(s.originCoverage.notCovered)}종 추가 수집 진행 중.`, ` are held as specimens. The remaining ${fmt(s.originCoverage.notCovered)} are still being collected.`))))
   );
 }
 
@@ -11080,6 +11131,7 @@ function HomePage({
   specimensProgress,
   synonyms
 }) {
+  const t = useT();
   const [center, setCenter] = useState("jeju"); // jeju | okcheon — 두 센터 데이터는 합치지 않고 탭으로 나눠서 보여준다
   const { data: okcheonSpecimens, loading: okcheonLoading } = useOkcheonSpecimens();
   const okcheonStats = useMemo(
@@ -11109,17 +11161,17 @@ function HomePage({
       fontWeight: 900,
       letterSpacing: -0.3
     }
-  }, "총괄 현황 대시보드"), /*#__PURE__*/React.createElement("p", {
+  }, t("총괄 현황 대시보드", "Overview Dashboard")), /*#__PURE__*/React.createElement("p", {
     style: {
       margin: 0,
       opacity: 0.8,
       fontSize: 13,
       lineHeight: 1.6
     }
-  }, "국립생약자원관 수장·관리 생약자원 표본 및 공정서 등재 현황 — 센터별로 나누어 확인할 수 있습니다.")),
+  }, t("국립생약자원관 수장·관리 생약자원 표본 및 공정서 등재 현황 — 센터별로 나누어 확인할 수 있습니다.", "Herbal resource specimens and pharmacopoeia registration status managed by the National Institute of Korea Herbal Resources — view by center."))),
   /*#__PURE__*/React.createElement("div", {
     style: { display: "flex", gap: 8, marginBottom: 18 }
-  }, [{ id: "jeju", label: "🌱 제주센터" }, { id: "okcheon", label: "🌿 옥천센터" }].map(c => /*#__PURE__*/React.createElement("button", {
+  }, [{ id: "jeju", label: t("🌱 제주센터", "🌱 Jeju Center") }, { id: "okcheon", label: t("🌿 옥천센터", "🌿 Okcheon Center") }].map(c => /*#__PURE__*/React.createElement("button", {
     key: c.id,
     onClick: () => setCenter(c.id),
     style: {
@@ -11136,7 +11188,7 @@ function HomePage({
   center === "jeju" && /*#__PURE__*/React.createElement(CenterOverview, {
     stats: window.__STATS__,
     hasStorage: true,
-    centerLabel: "제주센터",
+    centerLabel: t("제주센터", "Jeju Center"),
     navPrefix: "jeju-center",
     onNav: onNav,
     loading: specimensLoading,
@@ -11145,7 +11197,7 @@ function HomePage({
   center === "okcheon" && /*#__PURE__*/React.createElement(CenterOverview, {
     stats: okcheonStats,
     hasStorage: false,
-    centerLabel: "옥천센터",
+    centerLabel: t("옥천센터", "Okcheon Center"),
     navPrefix: "okcheon-center",
     onNav: onNav,
     loading: okcheonLoading,
@@ -11158,7 +11210,7 @@ function HomePage({
       color: "#2c3e50",
       marginBottom: 12
     }
-  }, "카테고리별 상세 보기"), /*#__PURE__*/React.createElement("div", {
+  }, t("카테고리별 상세 보기", "Browse by Category")), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))",
@@ -11167,41 +11219,41 @@ function HomePage({
   }, [{
     id: "pharma-search",
     icon: "📋",
-    title: "공정서 생약 검색",
-    desc: "KP·KHP 등재 생약 전체 검색 및 기원종 상세 조회",
-    stats: [`${fmt(window.__STATS__.summary.pharmacopoeia.total)}종 생약`, `${fmt(window.__STATS__.summary.pharmacopoeia.origins)}개 기원종`],
+    title: t("공정서 생약 검색", "Pharmacopoeia Herb Search"),
+    desc: t("KP·KHP 등재 생약 전체 검색 및 기원종 상세 조회", "Search all KP/KHP-listed herbs and view origin species details"),
+    stats: [t(`${fmt(window.__STATS__.summary.pharmacopoeia.total)}종 생약`, `${fmt(window.__STATS__.summary.pharmacopoeia.total)} herbs`), t(`${fmt(window.__STATS__.summary.pharmacopoeia.origins)}개 기원종`, `${fmt(window.__STATS__.summary.pharmacopoeia.origins)} origin spp.`)],
     color: "#2563a6",
     navTo: ["pharma-search"]
   }, {
     id: "jeju-center",
     icon: "🌱",
-    title: "제주센터",
-    desc: `전체 ${fmt(window.__STATS__.summary.specimens.total)}점 표본 검색 및 ${fmt(window.__STATS__.summary.specimens.species)}종 식물종(기원종) 정보 조회`,
-    stats: [`${fmt(window.__STATS__.summary.specimens.total)}점 표본`, `${fmt(window.__STATS__.summary.specimens.species)}종 식물종`],
+    title: t("제주센터", "Jeju Center"),
+    desc: t(`전체 ${fmt(window.__STATS__.summary.specimens.total)}점 표본 검색 및 ${fmt(window.__STATS__.summary.specimens.species)}종 식물종(기원종) 정보 조회`, `Search all ${fmt(window.__STATS__.summary.specimens.total)} specimens and view ${fmt(window.__STATS__.summary.specimens.species)} plant species (origin species) info`),
+    stats: [t(`${fmt(window.__STATS__.summary.specimens.total)}점 표본`, `${fmt(window.__STATS__.summary.specimens.total)} specimens`), t(`${fmt(window.__STATS__.summary.specimens.species)}종 식물종`, `${fmt(window.__STATS__.summary.specimens.species)} species`)],
     color: "#1a6b3e",
     navTo: ["jeju-center", { subTab: "specimen" }]
   }, {
     id: "okcheon-center",
     icon: "🌿",
-    title: "옥천센터",
-    desc: `전체 ${fmt(okcheonStats.summary.specimens.total)}점 표본 검색 및 ${fmt(okcheonStats.summary.specimens.species)}종 식물종(기원종) 정보 조회`,
-    stats: [`${fmt(okcheonStats.summary.specimens.total)}점 표본`, `${fmt(okcheonStats.summary.specimens.species)}종 식물종`],
+    title: t("옥천센터", "Okcheon Center"),
+    desc: t(`전체 ${fmt(okcheonStats.summary.specimens.total)}점 표본 검색 및 ${fmt(okcheonStats.summary.specimens.species)}종 식물종(기원종) 정보 조회`, `Search all ${fmt(okcheonStats.summary.specimens.total)} specimens and view ${fmt(okcheonStats.summary.specimens.species)} plant species (origin species) info`),
+    stats: [t(`${fmt(okcheonStats.summary.specimens.total)}점 표본`, `${fmt(okcheonStats.summary.specimens.total)} specimens`), t(`${fmt(okcheonStats.summary.specimens.species)}종 식물종`, `${fmt(okcheonStats.summary.specimens.species)} species`)],
     color: "#2d9c63",
     navTo: ["okcheon-center", { subTab: "specimen" }]
   }, {
     id: "map",
     icon: "🗺",
-    title: "생약 위치 지도",
-    desc: `${fmt(window.__STATS__.summary.map.points)}점 표본의 GPS 좌표를 지도에 표시 — 마커 클릭으로 표본 조회`,
-    stats: [`${fmt(window.__STATS__.summary.map.locations)}개 위치`, `${fmt(window.__STATS__.summary.map.points)}점 매핑`],
+    title: t("생약 위치 지도", "Herb Location Map"),
+    desc: t(`${fmt(window.__STATS__.summary.map.points)}점 표본의 GPS 좌표를 지도에 표시 — 마커 클릭으로 표본 조회`, `Shows GPS coordinates for ${fmt(window.__STATS__.summary.map.points)} specimens on a map — click a marker to view specimens`),
+    stats: [t(`${fmt(window.__STATS__.summary.map.locations)}개 위치`, `${fmt(window.__STATS__.summary.map.locations)} locations`), t(`${fmt(window.__STATS__.summary.map.points)}점 매핑`, `${fmt(window.__STATS__.summary.map.points)} mapped`)],
     color: "#7a3d1a",
     navTo: ["map"]
   }, {
     id: "stats",
     icon: "📊",
-    title: "통계",
-    desc: "공정서 등재 현황, 과별·약용부위별 분포 및 표본 현황(수장고별, 중요도) 통계",
-    stats: [`공정서 기원종 ${fmt(window.__STATS__.summary.pharmacopoeia.origins)}종`, `표본 ${fmt(window.__STATS__.summary.specimens.total)}점`],
+    title: t("통계", "Statistics"),
+    desc: t("공정서 등재 현황, 과별·약용부위별 분포 및 표본 현황(수장고별, 중요도) 통계", "Pharmacopoeia registration status, distribution by family/medicinal part, and specimen statistics (by storage room, importance)"),
+    stats: [t(`공정서 기원종 ${fmt(window.__STATS__.summary.pharmacopoeia.origins)}종`, `${fmt(window.__STATS__.summary.pharmacopoeia.origins)} origin spp.`), t(`표본 ${fmt(window.__STATS__.summary.specimens.total)}점`, `${fmt(window.__STATS__.summary.specimens.total)} specimens`)],
     color: "#2563a6",
     navTo: ["stats", { subTab: "pharma" }]
   }].map(c => /*#__PURE__*/React.createElement(NavCard, {
@@ -13608,6 +13660,7 @@ function StatsPage({ navParams, synonyms, onNav }) {
 }
 
 function App() {
+  const { lang, setLang, t } = useLangState();
   const [page, setPage] = useState("home");
   const [navParams, setNavParams] = useState(null);
 
@@ -13714,24 +13767,24 @@ function App() {
   const specimensProgressPct = specimensProgress.total > 0 ? Math.min(100, Math.round(specimensProgress.loaded / specimensProgress.total * 100)) : 0;
   const navItems = [{
     id: "home",
-    label: "총괄"
+    label: t("총괄", "Overview")
   }, {
     id: "pharma-search",
-    label: "공정서 생약"
+    label: t("공정서 생약", "Pharmacopoeia")
   }, {
     id: "jeju-center",
-    label: "제주센터"
+    label: t("제주센터", "Jeju Center")
   }, {
     id: "okcheon-center",
-    label: "옥천센터"
+    label: t("옥천센터", "Okcheon Center")
   }, {
     id: "map",
-    label: "🗺 생약 지도"
+    label: t("🗺 생약 지도", "🗺 Herb Map")
   }, {
     id: "stats",
-    label: "통계"
+    label: t("통계", "Statistics")
   }];
-  return /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement(LangContext.Provider, { value: { lang, setLang, t } }, /*#__PURE__*/React.createElement("div", {
     style: {
       fontFamily: "'Noto Sans KR','Apple SD Gothic Neo',sans-serif",
       background: "#f4f8f5",
@@ -13782,12 +13835,12 @@ function App() {
       fontSize: 14,
       fontWeight: 800
     }
-  }, "대한민국 생약자원 표본관(KHR) 현황"), /*#__PURE__*/React.createElement("div", {
+  }, t("대한민국 생약자원 표본관(KHR) 현황", "Korea Herbal Resources (KHR) Herbarium Status")), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       opacity: 0.7
     }
-  }, "국립생약자원관"))), /*#__PURE__*/React.createElement("nav", {
+  }, t("국립생약자원관", "National Institute of Korea Herbal Resources")))), /*#__PURE__*/React.createElement(LangToggle, null), /*#__PURE__*/React.createElement("nav", {
     style: {
       display: "flex",
       gap: 5,
@@ -13824,7 +13877,7 @@ function App() {
         fontWeight: 600,
         whiteSpace: "nowrap"
       }
-    }, "🗂 변경 이력"),
+    }, t("🗂 변경 이력", "🗂 Change Log")),
     /*#__PURE__*/React.createElement("button", {
       key: "logout",
       onClick: handleAdminLogout,
@@ -13839,7 +13892,7 @@ function App() {
         fontWeight: 600,
         whiteSpace: "nowrap"
       }
-    }, "🔓 관리자 로그아웃")
+    }, t("🔓 관리자 로그아웃", "🔓 Admin Logout"))
   ] : /*#__PURE__*/React.createElement("button", {
     key: "login",
     onClick: () => setShowAdminLogin(true),
@@ -13854,7 +13907,7 @@ function App() {
       fontWeight: 600,
       whiteSpace: "nowrap"
     }
-  }, "🔒 관리자 로그인")))), specimensLoading && /*#__PURE__*/React.createElement("div", {
+  }, t("🔒 관리자 로그인", "🔒 Admin Login"))))), specimensLoading && /*#__PURE__*/React.createElement("div", {
     style: {
       position: "sticky",
       top: 0,
@@ -13879,7 +13932,7 @@ function App() {
       color: "#0f3d22",
       fontWeight: 700
     }
-  }, /*#__PURE__*/React.createElement("span", null, "🌿 Supabase에서 표본 데이터를 불러오는 중입니다..."), /*#__PURE__*/React.createElement("span", null, `${fmt(specimensProgress.loaded)}${specimensProgress.total ? ` / ${fmt(specimensProgress.total)}` : ""}건${specimensProgressPct ? ` (${specimensProgressPct}%)` : ""}`)), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, t("🌿 Supabase에서 표본 데이터를 불러오는 중입니다...", "🌿 Loading specimen data from Supabase...")), /*#__PURE__*/React.createElement("span", null, `${fmt(specimensProgress.loaded)}${specimensProgress.total ? ` / ${fmt(specimensProgress.total)}` : ""}${t("건", "")}${specimensProgressPct ? ` (${specimensProgressPct}%)` : ""}`)), /*#__PURE__*/React.createElement("div", {
     style: {
       height: 6,
       background: "#d7ead9",
@@ -13936,7 +13989,7 @@ function App() {
       padding: "16px 20px",
       fontSize: 12
     }
-  }, "국립생약자원관 제주 센터 · 대한민국 생약자원 표본관(KHR) 현황 시스템"), showAdminLogin && /*#__PURE__*/React.createElement(AdminLoginModal, {
+  }, t("국립생약자원관 제주 센터 · 대한민국 생약자원 표본관(KHR) 현황 시스템", "National Institute of Korea Herbal Resources – Jeju Center · Korea Herbal Resources (KHR) Herbarium Status")), showAdminLogin && /*#__PURE__*/React.createElement(AdminLoginModal, {
     onClose: () => setShowAdminLogin(false),
     onSuccess: () => setIsAdmin(true)
   }), showHistory && /*#__PURE__*/React.createElement(ActivityLogModal, {
@@ -13945,7 +13998,7 @@ function App() {
       if (site === "okcheon") loadOkcheonSpecimensOnce(true);
       else loadAllSpecimens();
     }
-  }));
+  })));
 }
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(/*#__PURE__*/React.createElement(App, null));
