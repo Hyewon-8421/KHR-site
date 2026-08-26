@@ -190,6 +190,7 @@ function useSpecimenPhotos(id) {
 // 다른 사진을 클릭하면 미리보기가 바뀌도록 한다. 기존의 "사진을 클릭하면 더 크게 보기(라이트박스)"
 // 기능은 미리보기 이미지를 클릭했을 때 그대로 동작한다.
 function SpecimenPhotoGallery({ id, editable }) {
+  const t = useT();
   const { photos, loading, error, upload, remove } = useSpecimenPhotos(id);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null); // { current, total, name }
@@ -220,11 +221,11 @@ function SpecimenPhotoGallery({ id, editable }) {
   };
 
   const handleRemove = async name => {
-    if (!confirm("이 사진을 삭제할까요?")) return;
+    if (!confirm(t("이 사진을 삭제할까요?", "Delete this photo?"))) return;
     try {
       await remove(name);
     } catch (e) {
-      alert("삭제 실패: " + e.message);
+      alert(t("삭제 실패: ", "Delete failed: ") + e.message);
     }
   };
 
@@ -232,12 +233,12 @@ function SpecimenPhotoGallery({ id, editable }) {
 
   return React.createElement("div", { style: { marginTop: 16 } },
     React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
-      React.createElement("span", { style: { fontSize: 12, color: "#95a5a6" } }, "표본 스캔 사진", photos.length > 0 ? ` (${photos.length})` : ""),
+      React.createElement("span", { style: { fontSize: 12, color: "#95a5a6" } }, t("표본 스캔 사진", "Specimen Scan Photos"), photos.length > 0 ? ` (${photos.length})` : ""),
       editable && React.createElement("button", {
         onClick: () => fileRef.current?.click(),
         disabled: uploading,
         style: { padding: "4px 10px", borderRadius: 6, border: "1px solid #1a6b3e", background: "#fff", color: "#1a6b3e", cursor: uploading ? "default" : "pointer", fontSize: 11, fontWeight: 600 }
-      }, uploading && uploadProgress ? `업로드 중... (${uploadProgress.current}/${uploadProgress.total})` : "＋ 사진 추가 (여러 장 선택 가능)")
+      }, uploading && uploadProgress ? t(`업로드 중... (${uploadProgress.current}/${uploadProgress.total})`, `Uploading... (${uploadProgress.current}/${uploadProgress.total})`) : t("＋ 사진 추가 (여러 장 선택 가능)", "＋ Add Photos (multiple allowed)"))
     ),
     editable && React.createElement("input", {
       ref: fileRef,
@@ -247,13 +248,13 @@ function SpecimenPhotoGallery({ id, editable }) {
       style: { display: "none" },
       onChange: e => { handleFiles(e.target.files); e.target.value = ""; }
     }),
-    uploading && uploadProgress && uploadProgress.name && React.createElement("div", { style: { fontSize: 11, color: "#1a6b3e", marginBottom: 8 } }, `업로드 중: ${uploadProgress.name}`),
+    uploading && uploadProgress && uploadProgress.name && React.createElement("div", { style: { fontSize: 11, color: "#1a6b3e", marginBottom: 8 } }, t(`업로드 중: ${uploadProgress.name}`, `Uploading: ${uploadProgress.name}`)),
     uploadErr && React.createElement("div", { style: { fontSize: 11.5, color: "#c0392b", marginBottom: 8 } }, "⚠ " + uploadErr),
-    loading && React.createElement("div", { style: { fontSize: 12, color: "#95a5a6", padding: "10px 0" } }, "사진 불러오는 중..."),
-    error && React.createElement("div", { style: { fontSize: 12, color: "#c0392b", padding: "10px 0" } }, "사진 목록을 불러오지 못했습니다: " + error),
+    loading && React.createElement("div", { style: { fontSize: 12, color: "#95a5a6", padding: "10px 0" } }, t("사진 불러오는 중...", "Loading photos...")),
+    error && React.createElement("div", { style: { fontSize: 12, color: "#c0392b", padding: "10px 0" } }, t("사진 목록을 불러오지 못했습니다: ", "Failed to load photo list: ") + error),
     !loading && !error && photos.length === 0 && React.createElement("div", {
       style: { fontSize: 12, color: "#bdc3c7", padding: "14px 0", textAlign: "center", background: "#fafcfa", borderRadius: 8, border: "1px dashed #e0e8e2" }
-    }, "등록된 이미지 없음"),
+    }, t("등록된 이미지 없음", "No images registered")),
     photos.length > 0 && activePhoto && React.createElement("div", {
       style: { position: "relative", borderRadius: 10, overflow: "hidden", border: "1px solid #eef2f5", background: "#f4f8f5", marginBottom: photos.length > 1 ? 8 : 0 }
     },
@@ -265,7 +266,7 @@ function SpecimenPhotoGallery({ id, editable }) {
       }),
       editable && React.createElement("button", {
         onClick: e => { e.stopPropagation(); handleRemove(activePhoto.key); },
-        title: "사진 삭제",
+        title: t("사진 삭제", "Delete photo"),
         style: { position: "absolute", top: 6, right: 6, width: 24, height: 24, borderRadius: "50%", border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", fontSize: 13, cursor: "pointer", lineHeight: "24px", padding: 0 }
       }, "✕")
     ),
@@ -274,7 +275,7 @@ function SpecimenPhotoGallery({ id, editable }) {
     }, photos.map((p, i) => React.createElement("div", {
       key: p.name,
       onClick: () => setActiveIdx(i),
-      title: "클릭하면 이 사진을 크게 봅니다",
+      title: t("클릭하면 이 사진을 크게 봅니다", "Click to enlarge this photo"),
       style: {
         borderRadius: 6,
         overflow: "hidden",
@@ -8168,7 +8169,7 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
   function isExcludedOrigin(name) {
     return EXCLUDE_KEYWORDS.some(k => (name || "").includes(k));
   }
-  const originGroups = new Map(); // 기원명(국명) → { sciNames: Set, types: Set }
+  const originGroups = new Map(); // 기원명(국명) → { sciNames: Set, types: Set }  (동속 근연 "제외" — 정밀 목록)
   originsList.forEach(o => {
     const key = (o.origin || "").trim();
     // 우담남성·반하생강백반제처럼 여러 생약을 혼합해 만들어 기원종을 별도로
@@ -8215,6 +8216,7 @@ function computeStatsFromSpecimens(specimens, pharmaData, synonyms) {
     const resolved = synonymMap.get(korName) || korName;
     const group = originGroups.get(resolved);
     if (!group || group.types.size === 0) return "미등재";
+
     if (group.types.has("KP")) return "KP";
     if (group.types.has("KHP")) return "KHP";
     return "미등재";
@@ -8525,6 +8527,7 @@ function PharmaModal({
   drug,
   onClose
 }) {
+  const t = useT();
   const [selectedOrigin, setSelectedOrigin] = useState(null); // "보유" 배지를 클릭한 기원종(표본 목록 보기용)
   if (!drug) return null;
   const typeColor = drug.type === "KP" ? "#1a4a7a" : drug.type === "KHP" ? "#1a6b3e" : "#7a4a1a";
@@ -8572,7 +8575,7 @@ function PharmaModal({
       fontSize: 13,
       color: "#7f8c8d"
     }
-  }, drug.family?.split("/")[0], " · 약용부위: ", drug.part || "—")), /*#__PURE__*/React.createElement("button", {
+  }, drug.family?.split("/")[0], t(" · 약용부위: ", " · Medicinal Part: "), drug.part || "—")), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: {
       background: "#f4f8f4",
@@ -8597,7 +8600,7 @@ function PharmaModal({
       textTransform: "uppercase",
       letterSpacing: 0.5
     }
-  }, "기원종 목록"), drug.origins.map((o, i) => /*#__PURE__*/React.createElement("div", {
+  }, t("기원종 목록", "Origin Species List")), drug.origins.map((o, i) => /*#__PURE__*/React.createElement("div", {
     key: i,
     style: {
       background: i % 2 === 0 ? "#f8fafb" : "#fff",
@@ -8629,7 +8632,7 @@ function PharmaModal({
     }
   }, isHeld(o.origin) && /*#__PURE__*/React.createElement("span", {
     onClick: () => setSelectedOrigin(o.origin),
-    title: "제주센터 보유 표본 보기",
+    title: t("제주센터 보유 표본 보기", "View Jeju Center specimens"),
     style: {
       background: "#fdeee0",
       color: "#e67e22",
@@ -8639,7 +8642,7 @@ function PharmaModal({
       fontWeight: 700,
       cursor: "pointer"
     }
-  }, "보유 ›"), /*#__PURE__*/React.createElement("span", {
+  }, t("보유 ›", "Held ›")), /*#__PURE__*/React.createElement("span", {
     style: {
       background: o.type === "KP" ? "#e6f1fb" : "#e8f5ee",
       color: o.type === "KP" ? "#1a4a7a" : "#1a6b3e",
@@ -8664,7 +8667,7 @@ function PharmaModal({
       marginTop: 4,
       flexWrap: "wrap"
     }
-  }, /*#__PURE__*/React.createElement("span", null, "과명: ", o.family?.split("/")[0]), o.alias && /*#__PURE__*/React.createElement("span", null, "이명: ", o.alias)))))), selectedOrigin && /*#__PURE__*/React.createElement(OriginSpecimenModal, {
+  }, /*#__PURE__*/React.createElement("span", null, t("과명: ", "Family: "), o.family?.split("/")[0]), o.alias && /*#__PURE__*/React.createElement("span", null, t("이명: ", "Alias: "), o.alias)))))), selectedOrigin && /*#__PURE__*/React.createElement(OriginSpecimenModal, {
     originName: selectedOrigin,
     onClose: () => setSelectedOrigin(null)
   }));
@@ -8679,6 +8682,7 @@ function FamilyOriginsModal({
   onClose,
   onSelectOrigin
 }) {
+  const t = useT();
   // PHARMA_DATA 전체에서 국문 과명이 일치하는 기원종만 모은다 (예: "국화과/Compositae" → "국화과").
   const items = [];
   PHARMA_DATA.forEach(drug => {
@@ -8703,7 +8707,7 @@ function FamilyOriginsModal({
     }, familyName),
     React.createElement("div", {
       style: { fontSize: 13, color: "#7f8c8d", marginTop: 2 }
-    }, `공정서 기원종 ${items.length}종`)
+    }, t(`공정서 기원종 ${items.length}종`, `Pharmacopoeia Origin Species: ${items.length}`))
   );
 
   const closeButton = React.createElement("button", {
@@ -8724,7 +8728,7 @@ function FamilyOriginsModal({
 
   const emptyState = React.createElement("div", {
     style: { padding: 30, textAlign: "center", color: "#95a5a6", fontSize: 14 }
-  }, "해당 과에 속하는 기원종이 없습니다.");
+  }, t("해당 과에 속하는 기원종이 없습니다.", "No origin species belong to this family."));
 
   const itemRows = items.map((it, i) => {
     const nameBlock = React.createElement("div", null,
@@ -8746,17 +8750,17 @@ function FamilyOriginsModal({
       style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }
     }, nameBlock, typeBadge);
     const metaSpans = [
-      React.createElement("span", { key: "drug" }, "출전 생약: ", it.drug.name)
+      React.createElement("span", { key: "drug" }, t("출전 생약: ", "Source Herb: "), it.drug.name)
     ];
-    if (it.part) metaSpans.push(React.createElement("span", { key: "part" }, "약용부위: ", it.part));
-    if (it.alias) metaSpans.push(React.createElement("span", { key: "alias" }, "이명: ", it.alias));
+    if (it.part) metaSpans.push(React.createElement("span", { key: "part" }, t("약용부위: ", "Part: "), it.part));
+    if (it.alias) metaSpans.push(React.createElement("span", { key: "alias" }, t("이명: ", "Alias: "), it.alias));
     const metaRow = React.createElement("div", {
       style: { display: "flex", gap: 12, fontSize: 12, color: "#95a5a6", marginTop: 6, flexWrap: "wrap" }
     }, metaSpans);
     return React.createElement("div", {
       key: i,
       onClick: () => onSelectOrigin(it.drug),
-      title: "생약 상세 정보 보기",
+      title: t("생약 상세 정보 보기", "View herb details"),
       style: {
         background: i % 2 === 0 ? "#f8fafb" : "#fff",
         border: "1px solid #eef2f5", borderRadius: 10, padding: "12px 16px",
@@ -8784,6 +8788,7 @@ function PartOriginsModal({
   onClose,
   onSelectOrigin
 }) {
+  const t = useT();
   const items = [];
   PHARMA_DATA.forEach(drug => {
     (drug.origins || []).forEach(o => {
@@ -8807,7 +8812,7 @@ function PartOriginsModal({
     }, partName),
     React.createElement("div", {
       style: { fontSize: 13, color: "#7f8c8d", marginTop: 2 }
-    }, `공정서 기원종 ${items.length}종`)
+    }, t(`공정서 기원종 ${items.length}종`, `Pharmacopoeia Origin Species: ${items.length}`))
   );
 
   const closeButton = React.createElement("button", {
@@ -8828,7 +8833,7 @@ function PartOriginsModal({
 
   const emptyState = React.createElement("div", {
     style: { padding: 30, textAlign: "center", color: "#95a5a6", fontSize: 14 }
-  }, "해당 약용부위에 속하는 기원종이 없습니다.");
+  }, t("해당 약용부위에 속하는 기원종이 없습니다.", "No origin species belong to this medicinal part."));
 
   const itemRows = items.map((it, i) => {
     const nameBlock = React.createElement("div", null,
@@ -8850,17 +8855,17 @@ function PartOriginsModal({
       style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }
     }, nameBlock, typeBadge);
     const metaSpans = [
-      React.createElement("span", { key: "drug" }, "출전 생약: ", it.drug.name)
+      React.createElement("span", { key: "drug" }, t("출전 생약: ", "Source Herb: "), it.drug.name)
     ];
-    if (it.family) metaSpans.push(React.createElement("span", { key: "family" }, "과명: ", it.family.split("/")[0]));
-    if (it.alias) metaSpans.push(React.createElement("span", { key: "alias" }, "이명: ", it.alias));
+    if (it.family) metaSpans.push(React.createElement("span", { key: "family" }, t("과명: ", "Family: "), it.family.split("/")[0]));
+    if (it.alias) metaSpans.push(React.createElement("span", { key: "alias" }, t("이명: ", "Alias: "), it.alias));
     const metaRow = React.createElement("div", {
       style: { display: "flex", gap: 12, fontSize: 12, color: "#95a5a6", marginTop: 6, flexWrap: "wrap" }
     }, metaSpans);
     return React.createElement("div", {
       key: i,
       onClick: () => onSelectOrigin(it.drug),
-      title: "생약 상세 정보 보기",
+      title: t("생약 상세 정보 보기", "View herb details"),
       style: {
         background: i % 2 === 0 ? "#f8fafb" : "#fff",
         border: "1px solid #eef2f5", borderRadius: 10, padding: "12px 16px",
@@ -8890,6 +8895,7 @@ function OriginSpecimenModal({
   originName,
   onClose
 }) {
+  const t = useT();
   const [selectedSpec, setSelectedSpec] = useState(null);
   const synonymMap = new Map(window.__SYNONYMS__ || []);
   const specimens = window.__SPEC__ || [];
@@ -8911,12 +8917,12 @@ function OriginSpecimenModal({
     style: { fontSize: 19, fontWeight: 700, color: "#1a2e1a", marginBottom: 4 }
   }, originName), /*#__PURE__*/React.createElement("div", {
     style: { fontSize: 12, color: "#7f8c8d" }
-  }, "제주센터 보유 표본 ", specList.length, "건")), /*#__PURE__*/React.createElement("button", {
+  }, t("제주센터 보유 표본 ", "Jeju Center Specimens Held: "), specList.length, t("건", ""))), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: { background: "#f4f8f4", border: "none", borderRadius: 7, width: 30, height: 30, cursor: "pointer", fontSize: 16, color: "#546e7a" }
   }, "✕")), specList.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: { textAlign: "center", padding: 20, color: "#95a5a6", fontSize: 12.5 }
-  }, "매칭되는 표본 데이터가 없습니다.") : specList.map((sp, i) => {
+  }, t("매칭되는 표본 데이터가 없습니다.", "No matching specimen data.")) : specList.map((sp, i) => {
     const [id,, stor,, dn, kn,, cd,,,,, gps, ph] = sp;
     const sc = stor === "1수장고" ? "#1a6b3e" : "#1a4a7a";
     const sb = stor === "1수장고" ? "#e8f5ee" : "#e6f1fb";
@@ -9014,6 +9020,7 @@ function SpecimenModal({
   endpoints,
   hasStorage
 }) {
+  const t = useT();
   if (!spec) return null;
   // endpoints를 넘기지 않으면 기존(제주센터) 표본 API를 그대로 사용한다 — 하위 호환.
   const EP = endpoints || {
@@ -9060,19 +9067,19 @@ function SpecimenModal({
         body: JSON.stringify({ apiKey: ADMIN_PASSWORD, "관리번호": form.id, data: newRow }),
       });
       const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "저장 실패");
-      setSaveMsg({ ok: true, msg: "저장됐습니다." });
+      if (!json.ok) throw new Error(json.error || t("저장 실패", "Save failed"));
+      setSaveMsg({ ok: true, msg: t("저장됐습니다.", "Saved.") });
       setEditMode(false);
       if (onSaved) onSaved(newRow);
     } catch(e) {
-      setSaveMsg({ ok: false, msg: "저장 실패: " + e.message });
+      setSaveMsg({ ok: false, msg: t("저장 실패: ", "Save failed: ") + e.message });
     } finally {
       setSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`"${korName}" (${id}) 표본을 정말 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return;
+    if (!confirm(t(`"${korName}" (${id}) 표본을 정말 삭제할까요? 이 작업은 되돌릴 수 없습니다.`, `Are you sure you want to delete specimen "${korName}" (${id})? This cannot be undone.`))) return;
     setDeleting(true);
     try {
       const res = await fetch(EP.delete, {
@@ -9081,11 +9088,11 @@ function SpecimenModal({
         body: JSON.stringify({ apiKey: ADMIN_PASSWORD, "관리번호": id, "표본번호": specNo }),
       });
       const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "삭제 실패");
+      if (!json.ok) throw new Error(json.error || t("삭제 실패", "Delete failed"));
       if (onDeleted) onDeleted(id);
       onClose();
     } catch (e) {
-      alert("삭제 실패: " + e.message);
+      alert(t("삭제 실패: ", "Delete failed: ") + e.message);
     } finally {
       setDeleting(false);
     }
