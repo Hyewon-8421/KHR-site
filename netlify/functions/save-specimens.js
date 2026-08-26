@@ -163,8 +163,11 @@ exports.handler = async function(event, context) {
         ? "resolution=merge-duplicates,return=minimal"
         : "resolution=ignore-duplicates,return=minimal";
 
+      // ⚠ on_conflict를 지정하지 않으면 PostgREST는 기본 키(id) 기준으로 충돌을
+      // 판단한다. "관리번호"가 기본 키가 아니라 별도 유니크 제약이라면 관리번호
+      // 중복을 못 잡아내고 409 오류가 날 수 있으므로 명시적으로 지정한다.
       const result = await httpsPost(
-        `${SUPABASE_URL}/rest/v1/specimens`,
+        `${SUPABASE_URL}/rest/v1/specimens?on_conflict=${encodeURIComponent("관리번호")}`,
         {
           "apikey": SUPABASE_KEY,
           "Authorization": `Bearer ${SUPABASE_KEY}`,
