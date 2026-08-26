@@ -163,8 +163,13 @@ exports.handler = async function(event, context) {
         ? "resolution=merge-duplicates,return=minimal"
         : "resolution=ignore-duplicates,return=minimal";
 
+      // ⚠ on_conflict를 지정하지 않으면 PostgREST는 기본적으로 테이블의 기본 키(id)를
+      // 기준으로 충돌을 판단한다. 이 테이블은 "관리번호"에 별도의 유니크 제약
+      // (specimens_okcheon_관리번호_key)이 걸려 있고 기본 키는 아니므로, on_conflict를
+      // 명시하지 않으면 관리번호 중복을 못 잡아내고 그대로 INSERT를 시도해
+      // "duplicate key value violates unique constraint" 409 오류가 난다.
       const result = await httpsPost(
-        `${SUPABASE_URL}/rest/v1/specimens_okcheon`,
+        `${SUPABASE_URL}/rest/v1/specimens_okcheon?on_conflict=${encodeURIComponent("관리번호")}`,
         {
           "apikey": SUPABASE_KEY,
           "Authorization": `Bearer ${SUPABASE_KEY}`,
