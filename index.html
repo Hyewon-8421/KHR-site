@@ -57,6 +57,21 @@ function useLangState() {
 function useT() {
   return useContext(LangContext).t;
 }
+// 화면 폭이 좁은지(모바일) 판단하는 hook. 이 앱은 CSS 클래스 없이 inline style만
+// 쓰고 있어서, 미디어 쿼리 대신 이 hook으로 화면 폭을 감지해 컴포넌트 안에서
+// "isMobile ? 모바일용 구조 : 기존 구조"로 분기하는 방식을 쓴다.
+const MOBILE_BREAKPOINT = 640;
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth <= MOBILE_BREAKPOINT : false
+  );
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= MOBILE_BREAKPOINT);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return isMobile;
+}
 // 컴포넌트(Hook) 밖(예: 모듈 스코프의 데이터 로딩 함수)에서도 쓸 수 있는 간단한 번역 헬퍼.
 // localStorage를 직접 읽으므로 React 렌더링과 무관하게 아무 곳에서나 호출 가능하다.
 function tPlain(ko, en) {
@@ -8896,8 +8911,10 @@ function OriginSpecimenModal({
 }) {
   const t = useT();
   const [selectedSpec, setSelectedSpec] = useState(null);
+  const [center, setCenter] = useState("jeju"); // jeju | okcheon — 어느 센터의 보유 표본을 볼지
+  const { data: okcheonSpecimens, loading: okcheonLoading } = useOkcheonSpecimens();
   const synonymMap = new Map(window.__SYNONYMS__ || []);
-  const specimens = window.__SPEC__ || [];
+  const specimens = center === "jeju" ? (window.__SPEC__ || []) : (okcheonSpecimens || []);
   const specList = specimens.filter(sp => {
     const kor = (sp[5] || "").trim();
     const resolved = synonymMap.get(kor) || kor;
@@ -8905,6 +8922,23 @@ function OriginSpecimenModal({
     const ph = (sp[13] || "").trim();
     return ph.includes("KP") || ph.includes("KHP");
   }); // 전체 조회 (예전에는 최대 50개로 제한되어 있었음)
+
+  const centerTabs = /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", gap: 7, marginBottom: 14 }
+  }, [{ id: "jeju", label: t("🌱 제주센터", "🌱 Jeju Center") }, { id: "okcheon", label: t("🌿 옥천센터", "🌿 Okcheon Center") }].map(c => /*#__PURE__*/React.createElement("button", {
+    key: c.id,
+    onClick: () => setCenter(c.id),
+    style: {
+      padding: "6px 13px",
+      borderRadius: 16,
+      border: "none",
+      cursor: "pointer",
+      fontWeight: 600,
+      fontSize: 12,
+      background: center === c.id ? "#1a6b3e" : "#f0f4f2",
+      color: center === c.id ? "#fff" : "#4a6050"
+    }
+  }, c.label)));
 
   return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(Modal, {
     onClose: onClose
@@ -8916,10 +8950,12 @@ function OriginSpecimenModal({
     style: { fontSize: 19, fontWeight: 700, color: "#1a2e1a", marginBottom: 4 }
   }, originName), /*#__PURE__*/React.createElement("div", {
     style: { fontSize: 12, color: "#7f8c8d" }
-  }, t("제주센터 보유 표본 ", "Jeju Center Specimens Held: "), specList.length, t("건", ""))), /*#__PURE__*/React.createElement("button", {
+  }, center === "jeju" ? t("제주센터 보유 표본 ", "Jeju Center Specimens Held: ") : t("옥천센터 보유 표본 ", "Okcheon Center Specimens Held: "), specList.length, t("건", ""))), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: { background: "#f4f8f4", border: "none", borderRadius: 7, width: 30, height: 30, cursor: "pointer", fontSize: 16, color: "#546e7a" }
-  }, "✕")), specList.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, "✕")), centerTabs, (center === "okcheon" && okcheonLoading) ? /*#__PURE__*/React.createElement("div", {
+    style: { textAlign: "center", padding: 20, color: "#1a6b3e", fontSize: 12.5, fontWeight: 600 }
+  }, t("⏳ 옥천센터 표본 데이터 불러오는 중...", "⏳ Loading Okcheon Center specimen data...")) : specList.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: { textAlign: "center", padding: 20, color: "#95a5a6", fontSize: 12.5 }
   }, t("매칭되는 표본 데이터가 없습니다.", "No matching specimen data.")) : specList.map((sp, i) => {
     const [id,, stor,, dn, kn,, cd,,,,, gps, ph] = sp;
@@ -8947,7 +8983,7 @@ function OriginSpecimenModal({
       style: { display: "flex", gap: 4, flexShrink: 0, marginLeft: 7 }
     }, ph && /*#__PURE__*/React.createElement("span", {
       style: { fontSize: 10, fontWeight: 600, background: "#e6f1fb", color: "#1a4a7a", borderRadius: 4, padding: "1px 5px" }
-    }, ph), /*#__PURE__*/React.createElement("span", {
+    }, ph), stor && /*#__PURE__*/React.createElement("span", {
       style: { fontSize: 10, fontWeight: 600, background: sb, color: sc, borderRadius: 4, padding: "1px 5px" }
     }, stor), /*#__PURE__*/React.createElement("span", {
       style: { fontSize: 13, color: "#bdc3c7", marginLeft: 2 }
@@ -10693,6 +10729,7 @@ function StatCard({
   accent,
   onClick
 }) {
+  const isMobile = useIsMobile();
   const [hov, setHov] = useState(false);
   return /*#__PURE__*/React.createElement("div", {
     onClick: onClick,
@@ -10701,7 +10738,7 @@ function StatCard({
     style: {
       background: "#fff",
       borderRadius: 12,
-      padding: "18px 20px",
+      padding: isMobile ? "13px 14px" : "18px 20px",
       boxShadow: hov ? "0 4px 16px rgba(0,0,0,0.14)" : "0 1px 6px rgba(0,0,0,0.08)",
       borderTop: `3px solid ${accent || "#1a6b3e"}`,
       cursor: onClick ? "pointer" : "default",
@@ -10710,7 +10747,7 @@ function StatCard({
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: isMobile ? 10 : 11,
       color: "#7f8c8d",
       letterSpacing: 0.5,
       marginBottom: 5,
@@ -10718,14 +10755,14 @@ function StatCard({
     }
   }, label), /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 26,
+      fontSize: isMobile ? 20 : 26,
       fontWeight: 800,
       color: "#1a2e1a",
       lineHeight: 1
     }
   }, value), sub && /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
+      fontSize: isMobile ? 10.5 : 11,
       color: "#95a5a6",
       marginTop: 4
     }
@@ -10736,20 +10773,21 @@ function Section({
   children,
   style
 }) {
+  const isMobile = useIsMobile();
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: "#fff",
       borderRadius: 12,
-      padding: "18px 18px 14px",
+      padding: isMobile ? "14px 14px 12px" : "18px 18px 14px",
       boxShadow: "0 1px 6px rgba(0,0,0,0.06)",
       ...style
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 13,
+      fontSize: isMobile ? 12.5 : 13,
       fontWeight: 700,
       color: "#2c3e50",
-      marginBottom: 14,
+      marginBottom: isMobile ? 12 : 14,
       paddingBottom: 10,
       borderBottom: "1px solid #eef2f5"
     }
@@ -10921,6 +10959,7 @@ function LegendItem({
 // stats를 넘길지만 바꿔주고 이 컴포넌트는 그 stats만 가지고 그린다.
 function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, loading, progress }) {
   const t = useT();
+  const isMobile = useIsMobile();
   const s = stats.summary;
   const st = stats;
   const HAS_STORAGE = hasStorage !== false;
@@ -11013,9 +11052,9 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
   }, m.label))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: 18,
-      marginBottom: 24
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+      gap: isMobile ? 14 : 18,
+      marginBottom: isMobile ? 18 : 24
     }
   }, /*#__PURE__*/React.createElement(Section, {
     title: t(`표본 공정서 등재율 (${fmt(s.specimens.total)}점)`, `Specimen Pharmacopoeia Coverage (${fmt(s.specimens.total)} pcs)`)
@@ -11023,9 +11062,11 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
     style: {
       display: "flex",
       alignItems: "center",
-      gap: 20
+      gap: isMobile ? 12 : 20,
+      flexWrap: isMobile ? "wrap" : "nowrap"
     }
   }, /*#__PURE__*/React.createElement(DonutChart, {
+    size: isMobile ? 104 : 130,
     segments: [{
       pct: specimenPharmView.bothPct,
       color: "#1a6b3e"
@@ -11064,9 +11105,11 @@ function CenterOverview({ stats, hasStorage, centerLabel, navPrefix, onNav, load
     style: {
       display: "flex",
       alignItems: "center",
-      gap: 20
+      gap: isMobile ? 12 : 20,
+      flexWrap: isMobile ? "wrap" : "nowrap"
     }
   }, /*#__PURE__*/React.createElement(DonutChart, {
+    size: isMobile ? 104 : 130,
     segments: [{
       pct: speciesPharmView.bothPct,
       color: "#2563a6"
@@ -11157,6 +11200,7 @@ function HomePage({
   synonyms
 }) {
   const t = useT();
+  const isMobile = useIsMobile();
   const [center, setCenter] = useState("jeju"); // jeju | okcheon — 두 센터 데이터는 합치지 않고 탭으로 나눠서 보여준다
   const { data: okcheonSpecimens, loading: okcheonLoading } = useOkcheonSpecimens();
   const okcheonStats = useMemo(
@@ -11166,23 +11210,24 @@ function HomePage({
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
     style: {
       background: "linear-gradient(135deg,#0f3d22,#1a6b3e)",
-      borderRadius: 18,
-      padding: "32px 32px 28px",
+      borderRadius: isMobile ? 14 : 18,
+      padding: isMobile ? "20px 18px 18px" : "32px 32px 28px",
       color: "#fff",
-      marginBottom: 24
+      marginBottom: isMobile ? 16 : 24
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 11,
-      letterSpacing: 2,
+      fontSize: isMobile ? 9.5 : 11,
+      letterSpacing: isMobile ? 1 : 2,
       opacity: 0.7,
       marginBottom: 6,
-      textTransform: "uppercase"
+      textTransform: "uppercase",
+      lineHeight: 1.5
     }
   }, "HERBARIUM OF KOREA HERBAL MEDICINE RESOURCES"), /*#__PURE__*/React.createElement("h1", {
     style: {
       margin: "0 0 8px",
-      fontSize: 26,
+      fontSize: isMobile ? 20 : 26,
       fontWeight: 900,
       letterSpacing: -0.3
     }
@@ -11190,23 +11235,24 @@ function HomePage({
     style: {
       margin: 0,
       opacity: 0.8,
-      fontSize: 13,
+      fontSize: isMobile ? 12 : 13,
       lineHeight: 1.6
     }
   }, t("국립생약자원관 수장·관리 생약자원 표본 및 공정서 등재 현황 — 센터별로 나누어 확인할 수 있습니다.", "Herbal resource specimens and pharmacopoeia registration status managed by the National Institute of Korea Herbal Resources — view by center."))),
   /*#__PURE__*/React.createElement("div", {
-    style: { display: "flex", gap: 8, marginBottom: 18 }
+    style: { display: "flex", gap: 8, marginBottom: isMobile ? 14 : 18 }
   }, [{ id: "jeju", label: t("🌱 제주센터", "🌱 Jeju Center") }, { id: "okcheon", label: t("🌿 옥천센터", "🌿 Okcheon Center") }].map(c => /*#__PURE__*/React.createElement("button", {
     key: c.id,
     onClick: () => setCenter(c.id),
     style: {
-      padding: "9px 18px",
+      flex: isMobile ? 1 : "initial",
+      padding: isMobile ? "9px 10px" : "9px 18px",
       borderRadius: 9,
       border: `1px solid ${center === c.id ? "#1a6b3e" : "#dce8dc"}`,
       background: center === c.id ? "#1a6b3e" : "#fff",
       color: center === c.id ? "#fff" : "#546e7a",
       cursor: "pointer",
-      fontSize: 13.5,
+      fontSize: isMobile ? 12.5 : 13.5,
       fontWeight: 700
     }
   }, c.label))),
@@ -13704,8 +13750,10 @@ function StatsPage({ navParams, synonyms, onNav }) {
 
 function App() {
   const { lang, setLang, t } = useLangState();
+  const isMobile = useIsMobile();
   const [page, setPage] = useState("home");
   const [navParams, setNavParams] = useState(null);
+  const [navHistory, setNavHistory] = useState([]); // 뒤로가기용: 이동하기 직전의 {page, navParams} 스택
 
   // ── 관리자 로그인 ─────────────────────────────────────────────────
   // 표본 업로드/수정/삭제는 관리자 로그인 상태에서만 가능하다.
@@ -13804,8 +13852,20 @@ function App() {
 
   // 대시보드 카드 등에서 페이지 이동과 함께 필터 조건을 함께 전달하기 위한 헬퍼
   const nav = (id, params) => {
+    // 같은 페이지 안에서 필터만 바뀌는 경우(예: 표본 검색 페이지에서 다른 필터로 재검색)는
+    // 뒤로가기 스택에 쌓지 않는다 — 페이지 자체를 이동할 때만 "이전 화면"으로 기록한다.
+    setNavHistory(h => id === page ? h : [...h, { page, navParams }]);
     setPage(id);
     setNavParams(params || null);
+  };
+  const goBack = () => {
+    setNavHistory(h => {
+      if (h.length === 0) return h;
+      const prev = h[h.length - 1];
+      setPage(prev.page);
+      setNavParams(prev.navParams);
+      return h.slice(0, -1);
+    });
   };
   const specimensProgressPct = specimensProgress.total > 0 ? Math.min(100, Math.round(specimensProgress.loaded / specimensProgress.total * 100)) : 0;
   const navItems = [{
@@ -13847,44 +13907,98 @@ function App() {
     style: {
       maxWidth: 1100,
       margin: "0 auto",
-      padding: "12px 20px",
+      padding: isMobile ? "10px 14px" : "12px 20px",
       display: "flex",
-      alignItems: "center",
+      flexDirection: isMobile ? "column" : "row",
+      alignItems: isMobile ? "stretch" : "center",
       justifyContent: "space-between",
-      gap: 16
+      gap: isMobile ? 8 : 16
     }
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       alignItems: "center",
-      gap: 12,
+      justifyContent: "space-between",
+      gap: 12
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: isMobile ? 8 : 12,
       cursor: "pointer",
-      flexShrink: 0
+      flexShrink: 0,
+      minWidth: 0
     },
     onClick: () => nav("home")
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       background: "rgba(255,255,255,0.15)",
       borderRadius: 9,
-      width: 38,
-      height: 38,
+      width: isMobile ? 32 : 38,
+      height: isMobile ? 32 : 38,
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
-      fontSize: 20
+      fontSize: isMobile ? 17 : 20,
+      flexShrink: 0
     }
-  }, "🌿"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  }, "🌿"), /*#__PURE__*/React.createElement("div", {
+    style: { minWidth: 0 }
+  }, /*#__PURE__*/React.createElement("div", {
     style: {
-      fontSize: 14,
-      fontWeight: 800
+      fontSize: isMobile ? 13 : 14,
+      fontWeight: 800,
+      whiteSpace: isMobile ? "nowrap" : "normal",
+      overflow: isMobile ? "hidden" : "visible",
+      textOverflow: isMobile ? "ellipsis" : "clip"
     }
-  }, t("대한민국 생약자원 표본관(KHR) 현황", "Korea Herbal Resources (KHR) Herbarium Status")), /*#__PURE__*/React.createElement("div", {
+  }, isMobile ? t("생약자원 표본관(KHR)", "KHR Herbarium") : t("대한민국 생약자원 표본관(KHR) 현황", "Korea Herbal Resources (KHR) Herbarium Status")), !isMobile && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       opacity: 0.7
     }
-  }, t("국립생약자원관", "National Institute of Korea Herbal Resources")))), /*#__PURE__*/React.createElement(LangToggle, null), /*#__PURE__*/React.createElement("nav", {
+  }, t("국립생약자원관", "National Institute of Korea Herbal Resources")))), isMobile && /*#__PURE__*/React.createElement("div", {
+    style: { display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }
+  }, /*#__PURE__*/React.createElement(LangToggle, null), navHistory.length > 0 && /*#__PURE__*/React.createElement("button", {
+    onClick: goBack,
     style: {
+      display: "flex",
+      alignItems: "center",
+      background: "rgba(255,255,255,0.15)",
+      border: "1px solid rgba(255,255,255,0.3)",
+      borderRadius: 7,
+      color: "#fff",
+      padding: "6px 9px",
+      cursor: "pointer",
+      fontSize: 12.5,
+      fontWeight: 600
+    }
+  }, "←"))), !isMobile && /*#__PURE__*/React.createElement(LangToggle, null), !isMobile && navHistory.length > 0 && /*#__PURE__*/React.createElement("button", {
+    onClick: goBack,
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 5,
+      background: "rgba(255,255,255,0.15)",
+      border: "1px solid rgba(255,255,255,0.3)",
+      borderRadius: 7,
+      color: "#fff",
+      padding: "6px 12px",
+      cursor: "pointer",
+      fontSize: 12.5,
+      fontWeight: 600,
+      flexShrink: 0
+    }
+  }, "← ", t("뒤로", "Back")), /*#__PURE__*/React.createElement("nav", {
+    style: isMobile ? {
+      display: "flex",
+      gap: 5,
+      flexWrap: "nowrap",
+      overflowX: "auto",
+      WebkitOverflowScrolling: "touch",
+      paddingBottom: 2
+    } : {
       display: "flex",
       gap: 5,
       flexWrap: "wrap",
@@ -13902,8 +14016,9 @@ function App() {
       cursor: "pointer",
       fontSize: 12,
       fontWeight: 600,
-      transition: "all 0.2s",
-      whiteSpace: "nowrap"
+      whiteSpace: isMobile ? "nowrap" : "normal",
+      flexShrink: 0,
+      transition: "all 0.2s"
     }
   }, n.label)), isAdmin ? [
     /*#__PURE__*/React.createElement("button", {
@@ -13957,7 +14072,7 @@ function App() {
       zIndex: 190,
       background: "#eef7f0",
       borderBottom: "1px solid #cfe6d8",
-      padding: "8px 20px",
+      padding: isMobile ? "8px 14px" : "8px 20px",
       boxShadow: "0 2px 8px rgba(0,0,0,0.06)"
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -13968,10 +14083,12 @@ function App() {
   }, /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
+      flexDirection: isMobile ? "column" : "row",
       justifyContent: "space-between",
-      alignItems: "center",
+      alignItems: isMobile ? "flex-start" : "center",
+      gap: isMobile ? 2 : 0,
       marginBottom: 6,
-      fontSize: 12,
+      fontSize: isMobile ? 11 : 12,
       color: "#0f3d22",
       fontWeight: 700
     }
@@ -13994,7 +14111,7 @@ function App() {
     style: {
       maxWidth: 1100,
       margin: "0 auto",
-      padding: "24px 18px 60px"
+      padding: isMobile ? "14px 10px 40px" : "24px 18px 60px"
     }
   }, page === "home" && /*#__PURE__*/React.createElement(HomePage, {
     onNav: nav,
