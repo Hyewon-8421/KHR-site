@@ -8149,6 +8149,102 @@ const PHARMA_DATA = [{
   "type": "KHP"
 }];
 
+// ─── 과명(Family)·약용부위(Part) 영문 표기 ──────────────────────────────────
+// 표본 데이터(국명·기원·학명)는 원문 그대로 유지하되, 과명과 약용부위는 화면에
+// 표시될 때 영어로 바꿔 보여준다. 과명은 PHARMA_DATA 자체에 "한글과명/라틴학명"
+// 형태로 이미 함께 들어있으므로, 이 라틴 학명을 그대로 영문 표기로 사용한다.
+// (표본의 과명 필드는 라틴명이 따로 없지만, 같은 생물학적 분류 체계를 쓰므로
+// PHARMA_DATA에서 뽑은 매핑을 표본 쪽 과명에도 그대로 적용할 수 있다.)
+const FAMILY_NAME_MAP = (() => {
+  const map = {};
+  const addFamily = raw => {
+    if (!raw) return;
+    const parts = String(raw).split("/");
+    if (parts.length < 2) return;
+    const kor = parts[0].trim();
+    const latin = parts.slice(1).join("/").trim();
+    if (kor && latin) map[kor] = latin;
+  };
+  PHARMA_DATA.forEach(drug => {
+    addFamily(drug.family);
+    (drug.origins || []).forEach(o => addFamily(o.family));
+  });
+  return map;
+})();
+function familyLabel(korFamily, t) {
+  const kor = (korFamily || "").split("/")[0].trim();
+  if (!kor) return korFamily || "";
+  return t(kor, FAMILY_NAME_MAP[kor] || kor);
+}
+
+// 약용부위는 PHARMA_DATA에 영문 표기가 함께 들어있지 않으므로 직접 사전을 둔다.
+// 콤마로 여러 부위를 나열한 값(예: "잎, 줄기, 가지")은 각 조각을 사전에서 찾아
+// 합쳐서 보여준다. 사전에 없는 값은 원문을 그대로 보여준다(번역 누락으로 빈 값이
+// 되는 일이 없도록).
+const PART_NAME_MAP = {
+  "가는 뿌리": "fine root", "가시": "thorn",
+  "가지, 잎, 벌레먹은 열매": "branch, leaf, insect-bored fruit",
+  "건조시킨 엽과 엽이 달린 가는 줄기의 가루": "powder of dried leaf and fine leafy stem",
+  "고무수지": "gum resin", "관상화": "disc floret", "구과": "cone", "균핵": "sclerotium",
+  "꽃": "flower", "꽃가루": "pollen", "꽃대": "flower stalk", "꽃받침": "calyx",
+  "꽃봉오리": "flower bud", "꽃봉오리, 막 피기 시작한 곷": "flower bud, newly opening flower",
+  "꽃봉오리, 화서": "flower bud, inflorescence", "꽃봉오리와 꽃": "flower bud and flower",
+  "꽃이삭": "flower spike", "나무껍질": "bark", "나무껍질, 뿌리껍질": "bark, root bark",
+  "나무줄기의 심재": "heartwood", "나무줄기의심재": "heartwood",
+  "덩굴성줄기": "vine stem", "덩굴성줄기, 뿌리줄기": "vine stem, rhizome",
+  "덩굴줄기": "vine stem", "덩이뿌리": "tuberous root", "덩이줄기": "tuber",
+  "두상화서": "capitulum (head inflorescence)",
+  "마디속에 생긴 덩어리, 작은 알맹이": "nodal growth, small grain",
+  "모근의덩이뿌리": "tuberous root of the mother root",
+  "박쥐나방과 곤충의 유충에서 기생해 자란 자실체, 유충의 몸체": "fruiting body grown parasitically on ghost moth larva, larval body",
+  "백색의 결정체": "white crystalline substance", "분비물": "secretion",
+  "불완전 성숙한 열매": "immature fruit", "비늘줄기": "bulb",
+  "비늘줄기를 건조한 것": "dried bulb", "뿌리": "root", "뿌리, 뿌리줄기": "root, rhizome",
+  "뿌리껍질": "root bark", "뿌리껍질, 줄기껍질": "root bark, stem bark",
+  "뿌리의 팽대부": "swollen part of the root", "뿌리줄기": "rhizome", "뿌리줄기 ": "rhizome",
+  "뿌리줄기, 잎자루의잔기": "rhizome, remnant of leaf stalk", "뿌리줄기의 마디": "node of rhizome",
+  "속에 소나무 뿌리를 감싸고 있는 균핵": "sclerotium enveloping a pine root",
+  "수간목": "trunk wood", "수액을 건조한 덩어리": "dried mass of exuded sap", "수지": "resin",
+  "수지가 땅속에서 오랜 세월을 경과하여 화석이 된 것": "resin fossilized underground over a long period",
+  "수지가땅속에서 오랫동안 묻혀서 이루어진것": "resin formed after long burial underground",
+  "수지를 가공 정제하여 만든것": "processed and refined resin",
+  "수피": "bark", "수피, 근피": "bark, root bark", "심재": "heartwood", "씨": "seed",
+  "씨 발아 시킨 것": "germinated seed", "씨, 당화시켜 농축": "seed, saccharified and concentrated",
+  "씨를 발효시킨것": "fermented seed",
+  "씨에 그 나무의 껍질과 황토를 섞어서 발효시킨것 ": "seed fermented with the tree's bark and loess",
+  "암술대, 암술머리": "style, stigma", "암술머리": "stigma",
+  "액즙을 건조한 것": "dried juice", "어린가지": "young branch", "어린가지, 잎": "young branch, leaf",
+  "어린잎, 건조시킨가루": "young leaf, dried powder", "어린잎, 배근": "young leaf, radicle",
+  "열매": "fruit", "열매 또는 씨의 덩어리": "mass of fruit or seed",
+  "열매 발아시킨것": "germinated fruit", "열매 중 섬유질의 망상조직": "fibrous reticulated tissue of the fruit",
+  "열매, 씨": "fruit, seed", "열매껍질": "fruit peel", "열매꼭지": "fruit calyx (stalk end)",
+  "열매에서 사물딘 수지를 가열 아박하여 만든 덩어리": "mass made by heating resin exuded from the fruit",
+  "열매의 겉껍질": "outer fruit peel", "열매의 속씨": "fruit kernel",
+  "육질경": "fleshy stem", "잎": "leaf", "잎, 끝가지": "leaf, twig tip",
+  "잎, 덩굴성줄기": "leaf, vine stem", "잎, 어린가지에서 얻은 건조수성엑스": "dried aqueous extract from leaf and young branch",
+  "잎, 어린줄기": "leaf, young stem", "잎, 줄기, 가지": "leaf, stem, branch",
+  "잎을 발효시켜 얻은가루": "powder from fermented leaf", "자근": "purple root (gromwell root)",
+  "자실체": "fruiting body", "작은잎": "leaflet",
+  "잘 익은 열매, 발아시켜말린것": "ripe fruit, germinated and dried",
+  "장뇌유를 냉각시켜 석출한 결정체": "crystals precipitated by cooling camphor oil",
+  "전조": "whole bird (dried)", "전초": "whole plant",
+  "조결정체": "crude crystals", "줄기": "stem", "줄기, 가지": "stem, branch",
+  "줄기, 가지, 뿌리의 껍질": "bark of stem, branch, and root",
+  "줄기, 뿌리의 심재": "heartwood of stem and root", "줄기껍질": "stem bark",
+  "줄기껍질, 가지껍질": "stem bark, branch bark", "줄기껍질, 뿌리껍질": "stem bark, root bark",
+  "줄기의 수": "pith of stem", "줄기의수": "pith of stem",
+  "중간충": "middle layer (insect-derived)", "중간층": "middle layer",
+  "즙액": "sap", "지상부": "aerial part", "초질경": "herbaceous stem", "코르크": "cork",
+  "코르크피를 제거한 껍질을 말린것": "dried bark with cork layer removed",
+  "포자": "spore", "핵과": "drupe", "헛비늘줄기": "pseudobulb", "헛씨껍질": "aril",
+  "헛줄기의겉껍질": "outer layer of pseudostem", "화서": "inflorescence"
+};
+function partLabel(korPart, t) {
+  const kor = (korPart || "").trim();
+  if (!kor) return korPart || "";
+  return t(kor, PART_NAME_MAP[kor] || kor);
+}
+
 // ─── 통계 데이터 (표본 데이터로부터 동적 계산) ──────────────────────────────
 // 예전에는 이 통계가 최초 표본 20,134건 기준으로 정적으로 계산되어 있었지만,
 // 이제 Supabase에서 불러온 전체 표본을 기준으로 매번 다시 계산한다.
@@ -8591,7 +8687,7 @@ function PharmaModal({
       fontSize: 13,
       color: "#7f8c8d"
     }
-  }, drug.family?.split("/")[0], t(" · 약용부위: ", " · Medicinal Part: "), drug.part || "—")), /*#__PURE__*/React.createElement("button", {
+  }, familyLabel(drug.family, t), t(" · 약용부위: ", " · Medicinal Part: "), partLabel(drug.part, t) || "—")), /*#__PURE__*/React.createElement("button", {
     onClick: onClose,
     style: {
       background: "#f4f8f4",
@@ -8684,7 +8780,7 @@ function PharmaModal({
       marginTop: 4,
       flexWrap: "wrap"
     }
-  }, /*#__PURE__*/React.createElement("span", null, t("과명: ", "Family: "), o.family?.split("/")[0]), o.alias && /*#__PURE__*/React.createElement("span", null, t("이명: ", "Alias: "), o.alias)))))), selectedOrigin && /*#__PURE__*/React.createElement(OriginSpecimenModal, {
+  }, /*#__PURE__*/React.createElement("span", null, t("과명: ", "Family: "), familyLabel(o.family, t)), o.alias && /*#__PURE__*/React.createElement("span", null, t("이명: ", "Alias: "), o.alias)))))), selectedOrigin && /*#__PURE__*/React.createElement(OriginSpecimenModal, {
     originName: selectedOrigin,
     onClose: () => setSelectedOrigin(null)
   }));
@@ -8722,7 +8818,7 @@ function FamilyOriginsModal({
   const titleBlock = React.createElement("div", null,
     React.createElement("div", {
       style: { fontSize: 22, fontWeight: 800, color: "#1a2e1a" }
-    }, familyName),
+    }, familyLabel(familyName, t)),
     React.createElement("div", {
       style: { fontSize: 13, color: "#7f8c8d", marginTop: 2 }
     }, t(`공정서 기원종 ${items.length}종`, `Pharmacopoeia Origin Species: ${items.length}`))
@@ -8770,7 +8866,7 @@ function FamilyOriginsModal({
     const metaSpans = [
       React.createElement("span", { key: "drug" }, t("출전 생약: ", "Source Herb: "), it.drug.name)
     ];
-    if (it.part) metaSpans.push(React.createElement("span", { key: "part" }, t("약용부위: ", "Part: "), it.part));
+    if (it.part) metaSpans.push(React.createElement("span", { key: "part" }, t("약용부위: ", "Part: "), partLabel(it.part, t)));
     if (it.alias) metaSpans.push(React.createElement("span", { key: "alias" }, t("이명: ", "Alias: "), it.alias));
     const metaRow = React.createElement("div", {
       style: { display: "flex", gap: 12, fontSize: 12, color: "#95a5a6", marginTop: 6, flexWrap: "wrap" }
@@ -8828,7 +8924,7 @@ function PartOriginsModal({
   const titleBlock = React.createElement("div", null,
     React.createElement("div", {
       style: { fontSize: 22, fontWeight: 800, color: "#1a2e1a" }
-    }, partName),
+    }, partLabel(partName, t)),
     React.createElement("div", {
       style: { fontSize: 13, color: "#7f8c8d", marginTop: 2 }
     }, t(`공정서 기원종 ${items.length}종`, `Pharmacopoeia Origin Species: ${items.length}`))
@@ -8876,7 +8972,7 @@ function PartOriginsModal({
     const metaSpans = [
       React.createElement("span", { key: "drug" }, t("출전 생약: ", "Source Herb: "), it.drug.name)
     ];
-    if (it.family) metaSpans.push(React.createElement("span", { key: "family" }, t("과명: ", "Family: "), it.family.split("/")[0]));
+    if (it.family) metaSpans.push(React.createElement("span", { key: "family" }, t("과명: ", "Family: "), familyLabel(it.family, t)));
     if (it.alias) metaSpans.push(React.createElement("span", { key: "alias" }, t("이명: ", "Alias: "), it.alias));
     const metaRow = React.createElement("div", {
       style: { display: "flex", gap: 12, fontSize: 12, color: "#95a5a6", marginTop: 6, flexWrap: "wrap" }
@@ -9373,12 +9469,14 @@ function PharmaSearchPage({
     label: t("과명", "Family"),
     value: familyFilter,
     options: families,
-    onChange: handleFilter(setFamilyFilter)
+    onChange: handleFilter(setFamilyFilter),
+    labelFn: f => familyLabel(f, t)
   }), /*#__PURE__*/React.createElement(FilterSelect, {
     label: t("약용부위", "Part Used"),
     value: partFilter,
     options: parts,
-    onChange: handleFilter(setPartFilter)
+    onChange: handleFilter(setPartFilter),
+    labelFn: p => partLabel(p, t)
   }), /*#__PURE__*/React.createElement(FilterSelect, {
     label: t("제주센터 보유", "Held by Jeju Center"),
     value: heldFilter,
@@ -9468,7 +9566,7 @@ function PharmaSearchPage({
     }
   }, t("보유 ›", "Held ›"))))), /*#__PURE__*/React.createElement("div", {
     style: { fontSize: 11.5, color: "#95a5a6" }
-  }, drug.family?.split("/")[0], drug.part ? ` · ${drug.part}` : "")) : /*#__PURE__*/React.createElement("div", {
+  }, familyLabel(drug.family, t), drug.part ? ` · ${partLabel(drug.part, t)}` : "")) : /*#__PURE__*/React.createElement("div", {
     key: drug.no,
     onClick: () => setSelectedDrug(drug),
     style: {
@@ -9527,12 +9625,12 @@ function PharmaSearchPage({
       fontSize: 13,
       color: "#546e7a"
     }
-  }, drug.family?.split("/")[0]), /*#__PURE__*/React.createElement("span", {
+  }, familyLabel(drug.family, t)), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 13,
       color: "#546e7a"
     }
-  }, drug.part), /*#__PURE__*/React.createElement("span", {
+  }, partLabel(drug.part, t)), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 11,
       fontWeight: 700,
@@ -10392,7 +10490,8 @@ function SpecimenSearchPage({
     onChange: v => {
       setFamilyFilter(v);
       setPage(1);
-    }
+    },
+    labelFn: f => familyLabel(f, t)
   }), /*#__PURE__*/React.createElement(FilterSelect, {
     label: t("공정서", "Pharmacopoeia"),
     value: pharmaFilter,
@@ -10719,12 +10818,13 @@ function FilterSelect({
   label,
   value,
   options,
-  onChange
+  onChange,
+  labelFn
 }) {
   const t = useT();
   // 필터 값 자체(예: "전체","보유","KP")는 비교 로직에 쓰이므로 그대로 두고,
-  // 화면에 보이는 글자만 영어로 바꿔준다. 목록에 없는 값(과명·약용부위·수장위치 등
-  // 실제 표본/생약 데이터에서 뽑아온 값)은 번역하지 않고 그대로 보여준다.
+  // 화면에 보이는 글자만 영어로 바꿔준다. labelFn이 주어지면(과명·약용부위 등
+  // 실제 데이터에서 뽑아온 값) 그 함수로 번역하고, 없으면 원문 그대로 보여준다.
   const OPTION_LABELS = {
     "전체": t("전체", "All"),
     "보유": t("보유", "Held"),
@@ -10734,6 +10834,7 @@ function FilterSelect({
     "1수장고": t("1수장고", "Storage 1"),
     "3수장고": t("3수장고", "Storage 3"),
   };
+  const displayOf = o => OPTION_LABELS[o] || (labelFn ? labelFn(o) : o);
   return /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
@@ -10762,7 +10863,7 @@ function FilterSelect({
   }, options.map(o => /*#__PURE__*/React.createElement("option", {
     key: o,
     value: o
-  }, OPTION_LABELS[o] || o))));
+  }, displayOf(o)))));
 }
 function Pagination({
   page,
@@ -10985,8 +11086,10 @@ function BarRow({
 function DonutChart({
   segments,
   size = 130,
-  centerLabel = "공정서 등재"
+  centerLabel
 }) {
+  const t = useT();
+  const label = centerLabel || t("공정서 등재", "Listed");
   const r = 50,
     cx = 70,
     cy = 70,
@@ -11040,7 +11143,7 @@ function DonutChart({
     textAnchor: "middle",
     fontSize: "9",
     fill: "#7f8c8d"
-  }, centerLabel));
+  }, label));
 }
 function LegendItem({
   color,
@@ -11644,7 +11747,7 @@ function PharmaStatsPage({ stats, centerLabel, onNav }) {
     title: t("과(Family)별 기원종 분포 TOP 10", "Top 10 Origin Species by Family")
   }, d.topFamilies.map((f, i) => /*#__PURE__*/React.createElement(BarRow, {
     key: i,
-    label: f.name,
+    label: familyLabel(f.name, t),
     count: f.count,
     max: maxFam,
     total: total,
@@ -11654,7 +11757,7 @@ function PharmaStatsPage({ stats, centerLabel, onNav }) {
     title: t("약용 부위별 기원종 분포", "Origin Species Distribution by Medicinal Part")
   }, d.parts.map((p, i) => /*#__PURE__*/React.createElement(BarRow, {
     key: i,
-    label: p.name,
+    label: partLabel(p.name, t),
     count: p.count,
     max: maxPart,
     total: total,
@@ -11902,7 +12005,7 @@ function SpecimenStatsPage({ stats, hasStorage, centerLabel, onNav, navPrefix })
         /*#__PURE__*/React.createElement(Section, { title: t("과(Family)별 표본 분포 TOP 15", "Top 15 Specimen Distribution by Family") },
           data.topFamilies.map((f, i) => /*#__PURE__*/React.createElement(BarRow, {
             key: i,
-            label: f.name,
+            label: familyLabel(f.name, t),
             count: f.count,
             max: maxFam,
             total: data.total,
@@ -12143,7 +12246,8 @@ function SpeciesPage({
     onChange: v => {
       setFamilyFilter(v);
       setPage(1);
-    }
+    },
+    labelFn: f => familyLabel(f, t)
   }), ["전체", "등재", "미등재", "KP", "KHP"].map(p => /*#__PURE__*/React.createElement("button", {
     key: p,
     onClick: () => {
@@ -12224,7 +12328,7 @@ function SpeciesPage({
     style: { fontSize: 11, fontStyle: "italic", color: "#546e7a", marginBottom: 4 }
   }, (s.sciName || "").substring(0, 36), (s.sciName || "").length > 36 ? "…" : ""), /*#__PURE__*/React.createElement("div", {
     style: { display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "#95a5a6" }
-  }, /*#__PURE__*/React.createElement("span", null, s.family), /*#__PURE__*/React.createElement("span", null, t(`표본 ${s.count}건`, `${s.count} specimens`)))) : /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("span", null, familyLabel(s.family, t)), /*#__PURE__*/React.createElement("span", null, t(`표본 ${s.count}건`, `${s.count} specimens`)))) : /*#__PURE__*/React.createElement("div", {
     key: s.korName + i,
     onClick: () => setSelected({
       ...s,
@@ -12274,7 +12378,7 @@ function SpeciesPage({
       fontSize: 12,
       color: "#546e7a"
     }
-  }, s.family), /*#__PURE__*/React.createElement("span", {
+  }, familyLabel(s.family, t)), /*#__PURE__*/React.createElement("span", {
     style: {
       fontSize: 11,
       fontWeight: 600,
@@ -12428,7 +12532,7 @@ function SpeciesModal({
       fontSize: 12,
       color: "#546e7a"
     }
-  }, s.family), s.drugName && /*#__PURE__*/React.createElement("span", {
+  }, familyLabel(s.family, t)), s.drugName && /*#__PURE__*/React.createElement("span", {
     style: {
       background: "#e8f5ee",
       borderRadius: 5,
@@ -14093,6 +14197,8 @@ function App() {
       flexDirection: isMobile ? "column" : "row",
       alignItems: isMobile ? "stretch" : "center",
       justifyContent: "space-between",
+      flexWrap: isMobile ? "nowrap" : "wrap",
+      rowGap: 8,
       gap: isMobile ? 8 : 16
     }
   }, /*#__PURE__*/React.createElement("div", {
@@ -14108,7 +14214,7 @@ function App() {
       alignItems: "center",
       gap: isMobile ? 8 : 12,
       cursor: "pointer",
-      flexShrink: 0,
+      flex: isMobile ? "0 0 auto" : "1 1 240px",
       minWidth: 0
     },
     onClick: () => nav("home")
@@ -14132,9 +14238,10 @@ function App() {
       fontWeight: 800,
       whiteSpace: isMobile ? "nowrap" : "normal",
       overflow: isMobile ? "hidden" : "visible",
-      textOverflow: isMobile ? "ellipsis" : "clip"
+      textOverflow: isMobile ? "ellipsis" : "clip",
+      wordBreak: isMobile ? "normal" : "break-word"
     }
-  }, isMobile ? t("생약자원 표본관(KHR)", "KHR Herbarium") : t("대한민국 생약자원 표본관(KHR) 현황", "Korea Herbal Resources (KHR) Herbarium Status")), !isMobile && /*#__PURE__*/React.createElement("div", {
+  }, isMobile ? t("생약자원 표본관(KHR)", "KHR Herbarium") : t("대한민국 생약자원 표본관(KHR) 현황", "Herbarium of Korea Herbal Medicine Resources (KHR) Status")), !isMobile && /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 11,
       opacity: 0.7
@@ -14330,7 +14437,7 @@ function App() {
       padding: "16px 20px",
       fontSize: 12
     }
-  }, t("국립생약자원관 제주 센터 · 대한민국 생약자원 표본관(KHR) 현황 시스템", "National Institute of Korea Herbal Resources – Jeju Center · Korea Herbal Resources (KHR) Herbarium Status")), showAdminLogin && /*#__PURE__*/React.createElement(AdminLoginModal, {
+  }, t("국립생약자원관 제주 센터 · 대한민국 생약자원 표본관(KHR) 현황 시스템", "National Institute of Korea Herbal Resources – Jeju Center · Herbarium of Korea Herbal Medicine Resources (KHR) Status")), showAdminLogin && /*#__PURE__*/React.createElement(AdminLoginModal, {
     onClose: () => setShowAdminLogin(false),
     onSuccess: () => setIsAdmin(true)
   }), showHistory && /*#__PURE__*/React.createElement(ActivityLogModal, {
