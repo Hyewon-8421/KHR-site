@@ -8258,7 +8258,8 @@ const FAMILY_NAME_MAP = (() => {
     "광대나물과": "Labiatae", "꼬리겨우살이과": "Loranthaceae", "녹제초과": "Melanthiaceae",
     "매꽃과": "Convolvulaceae", "수국과": "Hydrangeaceae", "아스파라거스과": "Asparagaceae",
     "아스포델과": "Asphodelaceae", "양치식물과": "Pteridophyta (unspecified family)",
-    "화본과": "Gramineae"
+    "화본과": "Gramineae", "알팅기아과": "Altingiaceae", "여우주머니과": "Phyllanthaceae",
+    "연꽃과": "Nelumbonaceae", "콜키쿰과": "Colchicaceae", "펜타필락스과": "Pentaphylacaceae"
   };
   Object.keys(SUPPLEMENT3).forEach(kor => {
     if (!map[kor]) map[kor] = SUPPLEMENT3[kor];
@@ -9486,6 +9487,7 @@ function SpecimenModal({
               React.createElement("table", { style: { width: "100%", borderCollapse: "collapse" } },
                 React.createElement("tbody", null,
                   [[t("관리번호", "Management No."), id], [t("표본번호", "Specimen No."), specNo], [t("수장고", "Storage Room"), storage], [t("수장위치", "Storage Location"), location],
+                   [t("과명", "Family"), family ? familyLabel(family, t) : ""],
                    [t("수집날짜", "Collection Date"), formatCollectDate(collectDate)], [t("수집장소", "Collection Site"), collectPlace], [t("수집 과제", "Collection Project"), project], [t("GPS 좌표", "GPS Coordinates"), gps]]
                     .filter(([, v]) => v)
                     .map(([k, v]) => React.createElement("tr", { key: k },
@@ -11006,7 +11008,7 @@ function SpecimenSearchPage({
       color: "#546e7a"
     } : {
       display: "grid",
-      gridTemplateColumns: HAS_STORAGE ? "28px 1.8fr 1.5fr 2fr 90px 106px 56px" : "28px 1.8fr 1.5fr 2fr 106px 56px",
+      gridTemplateColumns: HAS_STORAGE ? "28px 1.7fr 1.4fr 1.5fr 110px 90px 106px 56px" : "28px 1.7fr 1.4fr 1.5fr 110px 106px 56px",
       background: "#f4f8f4",
       padding: "10px 16px",
       fontSize: 12,
@@ -11027,7 +11029,7 @@ function SpecimenSearchPage({
       });
     },
     style: { cursor: "pointer" }
-  }), isMobile ? /*#__PURE__*/React.createElement("span", null, t("이 페이지 전체 선택", "Select all on this page")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", null, t("관리번호", "Mgmt No.")), /*#__PURE__*/React.createElement("span", null, t("생약명 / 국명", "Herb / Korean Name")), /*#__PURE__*/React.createElement("span", null, t("학명", "Scientific Name")), HAS_STORAGE && /*#__PURE__*/React.createElement("span", { style: { minWidth: 0 } }, t("수장고", "Storage")), /*#__PURE__*/React.createElement("span", { style: { minWidth: 0 } }, t("공정서", "Pharmacopoeia")), /*#__PURE__*/React.createElement("span", { style: { minWidth: 0 } }, t("등급", "Grade")))), paged.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }), isMobile ? /*#__PURE__*/React.createElement("span", null, t("이 페이지 전체 선택", "Select all on this page")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("span", null, t("관리번호", "Mgmt No.")), /*#__PURE__*/React.createElement("span", null, t("생약명 / 국명", "Herb / Korean Name")), /*#__PURE__*/React.createElement("span", null, t("학명", "Scientific Name")), /*#__PURE__*/React.createElement("span", { style: { minWidth: 0 } }, t("과", "Family")), HAS_STORAGE && /*#__PURE__*/React.createElement("span", { style: { minWidth: 0 } }, t("수장고", "Storage")), /*#__PURE__*/React.createElement("span", { style: { minWidth: 0 } }, t("공정서", "Pharmacopoeia")), /*#__PURE__*/React.createElement("span", { style: { minWidth: 0 } }, t("등급", "Grade")))), paged.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       padding: 40,
       textAlign: "center",
@@ -11076,6 +11078,13 @@ function SpecimenSearchPage({
               borderRadius: 5, padding: "2px 7px"
             }
           }, storage),
+          family && /*#__PURE__*/React.createElement("span", {
+            style: {
+              fontSize: 10.5, fontWeight: 600,
+              color: "#4a6050", background: "#f0f4f2",
+              borderRadius: 5, padding: "2px 7px"
+            }
+          }, familyLabel(family, t)),
           /*#__PURE__*/React.createElement("span", {
             style: {
               fontSize: 10.5, fontWeight: 600,
@@ -11098,7 +11107,7 @@ function SpecimenSearchPage({
       onClick: () => setSelected(s),
       style: {
         display: "grid",
-        gridTemplateColumns: HAS_STORAGE ? "28px 1.8fr 1.5fr 2fr 90px 106px 56px" : "28px 1.8fr 1.5fr 2fr 106px 56px",
+        gridTemplateColumns: HAS_STORAGE ? "28px 1.7fr 1.4fr 1.5fr 110px 90px 106px 56px" : "28px 1.7fr 1.4fr 1.5fr 110px 106px 56px",
         padding: "10px 16px",
         gap: 8,
         alignItems: "center",
@@ -11144,7 +11153,12 @@ function SpecimenSearchPage({
         fontSize: 12,
         color: "#546e7a"
       }
-    }, sciName?.substring(0, 35), sciName?.length > 35 ? "…" : ""), HAS_STORAGE && /*#__PURE__*/React.createElement("span", {
+    }, sciName?.substring(0, 35), sciName?.length > 35 ? "…" : ""), /*#__PURE__*/React.createElement("span", {
+      style: {
+        fontSize: 12,
+        color: "#4a6050"
+      }
+    }, family ? familyLabel(family, t) : "—"), HAS_STORAGE && /*#__PURE__*/React.createElement("span", {
       style: {
         fontSize: 11,
         fontWeight: 600,
